@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Mis finanzas</title>
+<meta name="description" content="Finanzas personales y de pareja: cuentas, presupuesto, recurrentes y metas.">
+<meta name="theme-color" content="#f7f2f8">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Finanzas">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<main id="app"></main>
+<button class="p fab" onclick="openForm()"><i class="icon-plus"></i> Movimiento</button>
+<nav>
+<button id="n-home" onclick="go('home')"><i class="icon-layout-dashboard"></i>Inicio</button>
+<button id="n-hist" onclick="go('hist')"><i class="icon-list"></i>Historial</button>
+<button id="n-acc" onclick="go('acc')"><i class="icon-wallet"></i>Cuentas</button>
+<button id="n-bud" onclick="go('bud')"><i class="icon-pie-chart"></i>Presupuesto</button>
+<button id="n-rec" onclick="go('rec')"><i class="icon-repeat" id="rec-badge-holder"></i>Recurrentes</button>
+<button id="n-goal" onclick="go('goal')"><i class="icon-target"></i>Metas</button>
+<button id="n-set" onclick="go('set')"><i class="icon-settings"></i>Ajustes</button>
+</nav>
+<dialog id="dlg"></dialog>
+<script src="vendor/chart.umd.js"></script>
+<script src="js/config.js"></script>
+<script src="js/core.js"></script>
+<script src="js/views.js"></script>
+<script src="js/sync-ui.js"></script>
+<script type="module" src="js/cloud.js"></script>
+</body>
+</html>
