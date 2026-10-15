@@ -1,7 +1,7 @@
 /* Service worker: permite abrir la app sin internet. Sube CACHE al publicar una versión nueva. */
-const CACHE = 'mis-finanzas-v5.0.0';
-const SHELL = ['./', 'index.html', 'css/app.css', 'js/config.js', 'js/core.js', 'js/views.js', 'js/sync-ui.js', 'js/cloud.js',
-  'vendor/chart.umd.js', 'vendor/firebase.js', 'vendor/xlsx.mini.min.js', 'manifest.webmanifest', 'icons/icon.svg', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
+const CACHE = 'mis-finanzas-v7.0.0';
+const SHELL = ['./', 'index.html', 'css/app.css', 'js/config.js', 'js/core.js', 'js/ui.js', 'js/screens.js', 'js/forms.js', 'js/lock.js', 'js/sync-ui.js', 'js/cloud.js',
+  'vendor/chart.umd.js', 'vendor/firebase.js', 'vendor/xlsx.mini.min.js', 'manifest.webmanifest', 'icons/favicon.png', 'icons/escudo.webp', 'icons/escudo-mini.webp', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))));
 self.addEventListener('activate', e => e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k != CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim())));
 self.addEventListener('message', e => { if (e.data == 'skip') self.skipWaiting(); });

@@ -8,6 +8,45 @@ Se instala en el teléfono desde el navegador (sin tiendas), funciona sin intern
 
 ---
 
+## Actualizar la app (si ya la tienes funcionando)
+
+**Tus datos no se pierden al actualizar**: viven en tu teléfono y en Firebase, no en los archivos de GitHub. Aun así, antes de empezar, en la app ve a **Más → Ajustes → Respaldo y Excel → Descargar respaldo** (o **Copiar respaldo** y pégalo en una nota). Es solo por seguridad: no hace falta importarlo después.
+
+1. **GitHub → tu repositorio → Add file → Upload files.** Arrastra todo el contenido de la carpeta del zip (`index.html`, `sw.js`, `manifest.webmanifest`, `README.md`, `firestore.rules` y las carpetas `css`, `js`, `icons`, `vendor`). El zip **no trae `js/config.js`**, así que tu conexión con Firebase se queda igual. Toca **Commit changes**.
+2. Si en el repositorio todavía existen `js/views.js` o `icons/icon.svg`, bórralos (abre el archivo → **⋯ → Delete file → Commit changes**). Ya no se usan.
+3. **Firebase → Firestore → Rules:** solo si nunca publicaste las reglas de la versión 6. Pega el contenido de `firestore.rules` y toca **Publish**. Volver a publicarlas no hace daño.
+4. Espera 1–2 minutos y abre la app. Cuando salga **"Hay una versión nueva"**, toca **Actualizar**. Si no sale, ciérrala por completo y ábrela otra vez.
+5. **iPhone:** para ver el ícono nuevo con el escudo, borra el ícono de la pantalla de inicio y vuelve a agregarlo desde Safari (**Compartir → Agregar a pantalla de inicio**). Tus datos no se borran: siguen en la nube.
+
+### Qué hay de nuevo en la 7
+
+- **Escudo Vélez García** en el ícono de la app, en Inicio, en Más y en la pantalla de bloqueo.
+- **7 paletas de colores** en **Más → Ajustes → Apariencia**: Original, Escudo Vélez García, Veranda, Cielo, Clásico, Winewood y Bosque. Cada una tiene versión clara y oscura, y cada teléfono elige la suya.
+- **iPhone ya no hace zoom** al tocar un campo para escribir.
+- **Cuentas claras (gastos compartidos):** al anotar un egreso eliges "Personal", "Compartido" o "Para otra persona". En **Más → Cuentas claras** ves quién le debe a quién y registras cuando se saldan.
+
+### Qué hay de nuevo en la 6
+
+- **Inicio más limpio**: disponible y patrimonio arriba, el resumen del mes, pendientes y alertas, metas y los últimos movimientos. Las gráficas están en **Más → Reportes**.
+- **Reportes**: mes a mes, con ingresos, egresos, ahorro, tasa de ahorro y comparación con el mes anterior; gráficas de 12 meses y de la evolución del patrimonio.
+- **Historial** agrupado por día con el total de cada día, buscador, filtros plegables y fechas como "13 oct". Tocar un movimiento lo abre para editarlo.
+- **Menú de 5 pestañas** (Inicio, Historial, Cuentas, Presupuesto y Más), un color principal con mejor contraste y cuentas más claras.
+- **Avisos propios**: ya no salen las alertas del navegador. Al borrar aparece **Deshacer**.
+- **Agregar más rápido**: monto grande, categorías con íconos, y la app recuerda la última cuenta.
+- **"Quién" automático**: cada uno pone su nombre y la app lo elige sola. Cada movimiento muestra quién lo anotó.
+- **Editar y duplicar**: transferencias y aportes a metas se pueden editar; cualquier movimiento se puede duplicar. Las categorías y personas se pueden renombrar (se actualiza todo el historial) y las subcategorías se manejan desde Ajustes.
+- **Tarjetas de crédito con día de corte y de pago**: la app calcula cuánto debías al corte, cuánto has pagado y te avisa antes de que venza. Tiene un botón **Pagar**.
+- **Facturas con corte y pago** (luz, internet…): en Recurrentes cada una muestra "vence en X días" o "venció".
+- **Recurrentes a metas y transferencias**: por ejemplo, "cada quincena pasar RD$5,000 de Nómina a Viaje". Llega a Inicio y lo confirmas con un toque.
+- **PIN, Face ID / huella** y botón para **ocultar montos** (el ojo de arriba).
+- **Tasa de cambio de referencia** por moneda, en Ajustes.
+- **Saldo insuficiente** ahora es una advertencia y no un bloqueo.
+- **Seguridad del hogar**: lista de miembros, sacar a alguien y generar un código nuevo de 8 caracteres (ej. `K7P2-9QXM`).
+
+> **Face ID / huella**: funciona con la app instalada en la pantalla de inicio (iPhone con iOS 16 o más nuevo, Android con Chrome). Es un bloqueo de la app en ese teléfono; tus datos de la nube, además, siempre necesitan tu correo y contraseña. En iPhone hay que tocar el ícono de la cara en la pantalla de bloqueo.
+
+---
+
 ## 1. Publicarla en GitHub Pages
 
 1. Crea una cuenta en [github.com](https://github.com) si no tienes.
@@ -27,7 +66,7 @@ Ya queda con su ícono, se abre a pantalla completa y funciona sin internet.
 ## 3. Traer tus datos de la versión anterior
 
 1. Abre la versión anterior (la de Claude), ve a **Ajustes** y toca **Copiar respaldo**.
-2. En la app nueva, ve a **Ajustes → Respaldo**, pega el texto en la caja y toca **Importar texto**.
+2. En la app nueva, ve a **Más → Ajustes → Respaldo y Excel → Importar un respaldo**, pega el texto en la caja y toca **Importar texto**.
 
 Se importan cuentas, movimientos, recurrentes, metas, presupuesto, categorías y personas. Hazlo **antes** de crear el hogar en la nube: así tus datos suben al hogar.
 
@@ -75,9 +114,9 @@ window.FIREBASE_CONFIG = {
 > Esos datos **no son secretos**: Firebase los diseñó para ir en el código de la página. La seguridad la ponen las reglas del paso 4.3.
 
 ### 4.5 Unirse los dos
-1. **Persona 1:** en la app, **Ajustes → Sincronización en la nube** → escribe tu correo y una contraseña → **Crear cuenta** → **Crear hogar con mis datos**.
+1. **Persona 1:** en la app, **Más → Ajustes → Nube y hogar** → escribe tu correo y una contraseña → **Crear cuenta** → escribe tu nombre → **Crear hogar con mis datos**.
 2. Toca **Copiar código** y envíaselo a tu pareja (por WhatsApp, por ejemplo).
-3. **Persona 2:** **Crear cuenta** con su propio correo → pega el código → **Unirme**.
+3. **Persona 2:** **Crear cuenta** con su propio correo → escribe su nombre → pega el código → **Unirme**.
    - Si en su teléfono ya tenía datos, la app pregunta si los quiere **agregar** al hogar o **descartar**.
 4. Listo. Arriba de cada pantalla aparece el estado: **Sincronizado**, **Enviando…** o **Sin conexión** (en ese caso los cambios se envían solos cuando vuelve el internet).
 
@@ -117,8 +156,12 @@ Si cambias de teléfono, solo entra con tu correo: la app recuerda tu hogar y ba
 ```
 index.html            la página
 css/app.css           estilos e íconos
-js/core.js            datos, cálculos (saldos, presupuesto, recurrentes, metas)
-js/views.js           pantallas y formularios
+js/core.js            datos y cálculos (saldos, presupuesto, recurrentes, metas, tarjetas, reportes)
+js/ui.js              avisos, acciones (guardar/borrar) y navegación
+js/screens.js         pantallas
+js/forms.js           formularios, categorías, respaldo y Excel
+js/lock.js            PIN y Face ID / huella
+icons/                escudo familiar e íconos de la app
 js/sync-ui.js         pantalla de la nube y arranque
 js/cloud.js           conexión con Firebase
 js/config.js          tu configuración de Firebase

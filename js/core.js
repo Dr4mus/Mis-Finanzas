@@ -7,8 +7,12 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const CUR_RE = /^[A-Z]{3}$/, ISO_RE = /^\d{4}-\d{2}-\d{2}$/, ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 const round2 = n => Math.round((+n || 0) * 100) / 100;
 const fmtCache = {};
+// Modo privado: oculta las cifras en pantalla
+let HIDE = false; try { HIDE = localStorage.getItem('fin_hide') == '1'; } catch (e) { }
+const CUR_SYM = { DOP: 'RD$', USD: 'US$', EUR: '€' };
 function money(n, c = 'DOP') {
   c = CUR_RE.test(c || '') ? c : 'DOP';
+  if (HIDE) return (CUR_SYM[c] || c + ' ') + '•••••';
   try {
     fmtCache[c] = fmtCache[c] || new Intl.NumberFormat('es-DO', { style: 'currency', currency: c, maximumFractionDigits: 2 });
     return fmtCache[c].format(n || 0);
@@ -21,6 +25,31 @@ const addDay = iso => addDays(iso, 1);
 const daysBetween = (a, b) => (new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 864e5;
 const now = () => Date.now();
 const maxISO = (a, b) => (a > b ? a : b);
+const MES3 = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
+const DIA3 = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+// "13 oct" (y el año si no es el actual)
+function fdate(iso, withYear) {
+  if (!ISO_RE.test(iso || '')) return iso || '';
+  const y = iso.slice(0, 4), m = +iso.slice(5, 7), d = +iso.slice(8, 10);
+  return d + ' ' + MES3[m - 1] + (withYear || y != today().slice(0, 4) ? ' ' + y : '');
+}
+function fday(iso) {
+  const td = today(), diff = daysBetween(iso, td), wd = DIA3[new Date(iso + 'T00:00:00Z').getUTCDay()];
+  if (diff == 0) return 'Hoy · ' + wd + ' ' + fdate(iso);
+  if (diff == 1) return 'Ayer · ' + wd + ' ' + fdate(iso);
+  return wd[0].toUpperCase() + wd.slice(1) + ' ' + fdate(iso);
+}
+// "Vence hoy", "En 3 días", "Venció hace 2 días"
+function dueLabel(iso) {
+  const n = daysBetween(today(), iso);
+  if (n == 0) return { t: 'Vence hoy', k: 'warn' };
+  if (n == 1) return { t: 'Vence mañana', k: 'warn' };
+  if (n > 1) return { t: 'En ' + n + ' días', k: n <= 3 ? 'warn' : '' };
+  return { t: 'Venció hace ' + (-n) + (n == -1 ? ' día' : ' días'), k: 'out' };
+}
+const ymLabel = ym => { const n = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'][+ym.slice(5, 7) - 1]; return n + ' ' + ym.slice(0, 4); };
+const addMonths = (ym, k) => { const d = new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7) - 1 + k, 1)); return d.toISOString().slice(0, 7); };
+const monthEnd = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).toISOString().slice(0, 10);
 
 // ============ íconos y colores ============
 const ICONS = ['home', 'utensils-crossed', 'car', 'heart-pulse', 'graduation-cap', 'plug-zap', 'clapperboard', 'shirt', 'credit-card', 'piggy-bank', 'briefcase', 'trending-up', 'gift', 'shopping-cart', 'dumbbell', 'plane', 'dog', 'baby', 'wrench', 'phone', 'wifi', 'book-open', 'coffee', 'beer', 'music', 'film', 'gamepad-2', 'scissors', 'stethoscope', 'pill', 'fuel', 'bus', 'train', 'bike', 'sofa', 'lightbulb', 'droplet', 'shield', 'landmark', 'wallet', 'banknote', 'receipt', 'tag'];
@@ -57,12 +86,13 @@ const num = v => (Number.isFinite(+v) ? +v : 0);
 const okId = x => x && ID_RE.test(String(x.id || ''));
 const okDate = d => ISO_RE.test(String(d || ''));
 function cleanTx(x) {
-  if (!okId(x) || !okDate(x.d) || !['i', 'e', 'tr', 'g'].includes(x.t)) return null;
+  if (!okId(x) || !okDate(x.d) || !['i', 'e', 'tr', 'g', 'st'].includes(x.t)) return null;
   const o = { ...x, a: num(x.a), v: num(x.v) };
   if (x.cu != null && !CUR_RE.test(x.cu)) o.cu = 'DOP';
   if (x.aTo != null) o.aTo = num(x.aTo);
   if (x.aa != null) o.aa = num(x.aa);
   if (x.r != null) o.r = num(x.r);
+  if (x.split != null && !(x.split == 'half' || /^for:/.test(String(x.split)))) delete o.split;
   for (const k of ['accId', 'accIdTo', 'goalId', 'home']) if (o[k] != null && !ID_RE.test(String(o[k]))) o[k] = null;
   return o;
 }
@@ -107,8 +137,10 @@ function rateOf(cu, d) {
     if (x.d <= d) { if (!best || x.d > best.d) best = x; }
     else if (!after || x.d < after.d) after = x;
   }
-  return (best || after || {}).r || 0;
+  return (best || after || {}).r || refRate(cu);
 }
+// Tasa de referencia que el usuario define en Ajustes
+const refRate = cu => +((cfg.rates || {})[cu]) || 0;
 
 // ============ saldos ============
 const isCard = a => a && a.type == 'Tarjeta de crédito';
@@ -167,7 +199,7 @@ const totalDeudaDOP = asOf => (totalsByCurrency(asOf).DOP || {}).deuda || 0;
 // Patrimonio aproximado en DOP usando la última tasa conocida de cada moneda.
 function netWorthApprox(asOf) {
   const t = totalsByCurrency(asOf); let s = 0, missing = [];
-  for (const [c, v] of Object.entries(t)) { const r = rateOf(c, asOf || today()); if (r) s += v.neto * r; else missing.push(c); }
+  for (const [c, v] of Object.entries(t)) { const r = c == 'DOP' ? 1 : (refRate(c) || rateOf(c, asOf || today())); if (r) s += v.neto * r; else missing.push(c); }
   return { total: round2(s), missing };
 }
 
@@ -264,7 +296,69 @@ const inF = x => (!F.f || x.d >= F.f) && (!F.u || x.d <= F.u);
 // Ingresos y egresos (para gráficas y Excel)
 const fl = () => txs.filter(x => (x.t == 'i' || x.t == 'e') && inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc)).sort((a, b) => b.d.localeCompare(a.d));
 // Historial: incluye transferencias y movimientos de metas (antes solo aparecían cuando estaban borrados)
-const histMatch = x => inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc || x.accIdTo == F.acc);
+const histMatch = x => (!F.q || txText(x).includes(norm(F.q))) && inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc || x.accIdTo == F.acc);
 const sum = (a, t) => a.filter(x => x.t == t).reduce((s, x) => s + x.v, 0);
 const grp = (a, k) => a.reduce((o, x) => (o[x[k]] = (o[x[k]] || 0) + x.v, o), {});
 const icoFor = (catName, type) => (cfg.cats.find(x => x.n == catName && x.t == type) || {}).icon || 'tag';
+
+// ============ tarjetas de crédito: corte y pago ============
+const clampDay = (y, m, day) => Math.min(day, new Date(Date.UTC(y, m + 1, 0)).getUTCDate());
+function lastDayOn(day, iso) { // fecha más reciente <= iso que cae en ese día del mes
+  let y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1;
+  for (let k = 0; k < 3; k++) { const d = new Date(Date.UTC(y, m, clampDay(y, m, day))).toISOString().slice(0, 10); if (d <= iso) return d; m--; if (m < 0) { m = 11; y--; } }
+}
+function nextDayAfter(day, iso) { // primera fecha > iso que cae en ese día del mes
+  let y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1;
+  for (let k = 0; k < 3; k++) { const d = new Date(Date.UTC(y, m, clampDay(y, m, day))).toISOString().slice(0, 10); if (d > iso) return d; m++; if (m > 11) { m = 0; y++; } }
+}
+// Saldo al corte, lo pagado desde entonces y cuánto falta antes de la fecha de pago
+function cardCycle(a) {
+  if (!isCard(a) || !(a.cutDay >= 1) || !(a.payDay >= 1)) return null;
+  const td = today(), cut = lastDayOn(+a.cutDay, td), pay = nextDayAfter(+a.payDay, cut);
+  const debtAtCut = Math.max(0, -acctBalance(a, cut));
+  const paid = txs.filter(x => x.d > cut && x.d <= td && ((x.t == 'tr' && x.accIdTo == a.id) || (x.t == 'i' && x.accId == a.id)))
+    .reduce((s, x) => s + (x.t == 'tr' ? x.aTo : amtInAcc(x, a)), 0);
+  const left = Math.max(0, round2(debtAtCut - paid));
+  return { cut, pay, nextCut: nextDayAfter(+a.cutDay, td), debtAtCut: round2(debtAtCut), paid: round2(paid), left, days: daysBetween(td, pay) };
+}
+
+// ============ reportes ============
+function monthStats(ym) {
+  const m = txs.filter(x => x.d.slice(0, 7) == ym);
+  const inc = sum(m, 'i'), exp = sum(m, 'e'), net = inc - exp;
+  return { inc: round2(inc), exp: round2(exp), net: round2(net), rate: inc > 0 ? Math.round(net / inc * 100) : null };
+}
+const pctChange = (a, b) => (b ? Math.round((a - b) / Math.abs(b) * 100) : null);
+
+// ============ búsqueda en historial ============
+const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+function txText(x) {
+  const a = accs.find(c => c.id == x.accId), b = accs.find(c => c.id == x.accIdTo), g = goals.find(q => q.id == x.goalId);
+  return norm([x.c, x.sub, x.n, x.w, x.byName, a && a.name, b && b.name, g && g.name, x.t == 'tr' ? 'transferencia' : '', x.t == 'st' ? 'saldo pareja' : '', x.to, x.split ? 'compartido' : '', x.a, x.v].join(' '));
+}
+
+// ============ gastos compartidos ============
+// Cada gasto puede ser personal, compartido entre todos o pagado para otra persona.
+// Devuelve el saldo neto de cada persona: positivo = le deben; negativo = debe.
+function sharedNet() {
+  const net = {}, add = (p, v) => { if (p) net[p] = round2((net[p] || 0) + v); };
+  for (const x of txs) {
+    if (x.t == 'e' && x.split && x.w) {
+      if (x.split == 'half') {
+        const others = cfg.people.filter(p => p != x.w), share = x.v / (others.length + 1);
+        others.forEach(o => { add(o, -share); add(x.w, share); });
+      } else { const o = x.split.slice(4); if (o && o != x.w) { add(o, -x.v); add(x.w, x.v); } }
+    } else if (x.t == 'st') { add(x.w, x.v); add(x.to, -x.v); }
+  }
+  return net;
+}
+// Quién le debe a quién, simplificado en pagos mínimos
+function settlements() {
+  const net = sharedNet(), deud = [], acre = [];
+  for (const [p, v] of Object.entries(net)) { if (v < -0.005) deud.push([p, -v]); else if (v > 0.005) acre.push([p, v]); }
+  const out = []; deud.sort((a, b) => b[1] - a[1]); acre.sort((a, b) => b[1] - a[1]);
+  let i = 0, j = 0;
+  while (i < deud.length && j < acre.length) { const m = Math.min(deud[i][1], acre[j][1]); out.push({ from: deud[i][0], to: acre[j][0], amount: round2(m) }); deud[i][1] -= m; acre[j][1] -= m; if (deud[i][1] < 0.005) i++; if (acre[j][1] < 0.005) j++; }
+  return out;
+}
+const splitLabel = x => (!x.split ? '' : x.split == 'half' ? 'compartido' : 'para ' + x.split.slice(4));
