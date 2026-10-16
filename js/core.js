@@ -1,4 +1,5 @@
 'use strict';
+(window.__V = window.__V || {})['core.js'] = '8.0.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -78,7 +79,8 @@ const DEF0 = JSON.stringify(DEF), fresh = () => JSON.parse(DEF0);
 
 // ============ estado ============
 const LS = 'fin4';
-let cfg = fresh(), txs = [], accs = [], adjs = [], recs = [], goals = [], cfgT = 0, dels = {}, trash = [];
+let cfg = fresh(), txs = [], accs = [], adjs = [], recs = [], goals = [], cfgT = 0, dels = {}, trash = [], bin = [];
+// trash: movimientos borrados · bin: cuentas, recurrentes, metas y ajustes borrados ({k, id, del, d}). Se guardan 30 días.
 let F = {}, tab = 'home', ch = [], budYm = today().slice(0, 7), budMode = 'base';
 
 // ---- limpieza de datos (al cargar o importar): evita datos corruptos o código inyectado ----
@@ -101,6 +103,7 @@ function cleanState(o) {
   const c = { ...fresh(), ...(o.cfg || {}) };
   c.cur = (c.cur || []).filter(x => CUR_RE.test(x) && x != 'DOP');
   c.cats = (c.cats || []).filter(x => x && x.n && (x.t == 'i' || x.t == 'e')).map(x => ({ ...x, icon: ICONS.includes(x.icon) ? x.icon : 'tag' }));
+  c.shortcuts = (Array.isArray(c.shortcuts) ? c.shortcuts : []).filter(x => x && ID_RE.test(String(x.id || '')) && x.name && (x.t == 'i' || x.t == 'e')).map(x => ({ ...x, a: x.a ? num(x.a) : null, cu: CUR_RE.test(x.cu || '') ? x.cu : 'DOP' }));
   return {
     cfg: c, cfgT: num(o.cfgT),
     txs: arr(o.txs, cleanTx),
@@ -109,11 +112,15 @@ function cleanState(o) {
     adjs: arr(o.adjs, x => (okId(x) && okDate(x.date) && ID_RE.test(String(x.accId)) ? { ...x, balance: num(x.balance), u: num(x.u || x.createdAt), createdAt: num(x.createdAt || x.u) } : null)),
     recs: arr(o.recs, x => (okId(x) && ID_RE.test(String(x.accId || 'x')) ? { ...x, amount: num(x.amount), currency: CUR_RE.test(x.currency) ? x.currency : 'DOP', done: Array.isArray(x.done) ? x.done.filter(okDate) : [], lastConfirmed: okDate(x.lastConfirmed) ? x.lastConfirmed : undefined, startDate: okDate(x.startDate) ? x.startDate : today() } : null)),
     goals: arr(o.goals, x => (okId(x) ? { ...x, target: num(x.target) } : null)),
+    bin: arr(o.bin, x => (x && ['acc', 'adj', 'rec', 'goal'].includes(x.k) && ID_RE.test(String(x.id || '')) && x.d && typeof x.d == 'object' ? { k: x.k, id: x.id, del: num(x.del), d: x.d } : null)),
     dels: Object.fromEntries(Object.entries(o.dels || {}).filter(([k, v]) => ID_RE.test(k)).map(([k, v]) => [k, num(v)]))
   };
 }
-function setState(s) { ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash } = s); }
-const snapshot = () => ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash });
+function setState(s) { ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash } = s); bin = s.bin || []; purgeOld(); }
+const snapshot = () => ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash, bin });
+// La papelera guarda lo borrado 30 días
+const KEEP_DAYS = 30;
+function purgeOld() { const lim = Date.now() - KEEP_DAYS * 864e5; trash = trash.filter(x => (x.del || 0) > lim); bin = bin.filter(x => (x.del || 0) > lim); }
 
 // ---- almacenamiento local (solo guarda; la nube se actualiza aparte en cada acción) ----
 function local() { try { localStorage.setItem(LS, JSON.stringify(snapshot())); } catch (e) { console.warn('No se pudo guardar localmente', e); } }
@@ -362,3 +369,130 @@ function settlements() {
   return out;
 }
 const splitLabel = x => (!x.split ? '' : x.split == 'half' ? 'compartido' : 'para ' + x.split.slice(4));
+
+// ============ planificación (v8): te alcanza, proyección, promedio y calendario ============
+// Convierte un monto entre monedas con la última tasa conocida
+function convert(amount, from, to, d) {
+  if (from == to) return amount;
+  const rf = rateOf(from, d), rt = rateOf(to, d);
+  return rf && rt ? round2(amount * rf / rt) : amount;
+}
+const recCur = r => r.currency || 'DOP';
+const recDOP = (r, d) => convert(r.amount, recCur(r), 'DOP', d);
+const liquidAccs = () => accs.filter(a => !isCard(a) && (a.currency || 'DOP') == 'DOP');
+const isLiquid = id => liquidAccs().some(a => a.id == id);
+// Fechas de un recurrente que aún no se han confirmado ni omitido, hasta "to" (incluye las vencidas)
+const recOpen = (r, to) => r.active === false ? [] : nextDates(r, recFrom(r), to).filter(d => !(r.done || []).includes(d));
+const paidByRec = a => recs.some(r => r.active !== false && r.t == 'tr' && r.accIdTo == a.id);
+// Próximo ingreso recurrente después de hoy
+function nextIncome() {
+  const td = today(); let best = null;
+  recs.filter(r => r.t == 'i' && r.active !== false).forEach(r => {
+    const d = recOpen(r, addDays(td, 70)).find(x => x > td);
+    if (d && (!best || d < best.d)) best = { d, r };
+  });
+  return best;
+}
+// ¿Cuánto puedes gastar hasta el próximo ingreso? Dinero libre (sin lo apartado para metas)
+// menos lo que ya está comprometido antes de esa fecha: facturas, aportes a metas, pagos de tarjeta.
+function safeToSpend() {
+  const liq = liquidAccs(); if (!liq.length) return null;
+  const td = today(), ym = td.slice(0, 7), ni = nextIncome();
+  const until = ni ? ni.d : (monthEnd(ym) > td ? monthEnd(ym) : monthEnd(addMonths(ym, 1)));
+  const free = round2(liq.reduce((s, a) => s + freeBal(a), 0)), items = [];
+  recs.forEach(r => {
+    if (!isLiquid(r.accId)) return; // lo que se paga con tarjeta no sale hoy de tus cuentas
+    const out = r.t == 'e' || r.t == 'g' || (r.t == 'tr' && !isLiquid(r.accIdTo));
+    if (!out) return;
+    recOpen(r, addDays(until, -1)).forEach(d => items.push({ name: r.name, d, v: recDOP(r, d), late: d < td, icon: recIcon(r), rec: r.id }));
+  });
+  accs.filter(isCard).forEach(a => {
+    const cy = cardCycle(a); if (!cy || cy.left <= 0 || cy.pay >= until || paidByRec(a)) return;
+    items.push({ name: 'Pagar ' + a.name, d: cy.pay, v: convert(cy.left, a.currency, 'DOP', td), late: cy.pay < td, icon: 'credit-card', card: a.id });
+  });
+  items.sort((x, y) => x.d.localeCompare(y.d));
+  const committed = round2(items.reduce((s, x) => s + x.v, 0)), left = round2(free - committed), days = Math.max(1, daysBetween(td, until));
+  return { until, income: ni, free, items, committed, left, days, perDay: left > 0 ? round2(left / days) : 0 };
+}
+// Saldo proyectado: parte del saldo de hoy y aplica los recurrentes y pagos de tarjeta pendientes.
+// Devuelve la serie diaria del disponible en pesos y las cuentas que quedarían en negativo (desde qué día y su peor saldo).
+function projection(days, daily = 0) {
+  const td = today(), end = addDays(td, days), ev = [];
+  recs.forEach(r => {
+    const from = accs.find(a => a.id == r.accId); if (!from) return;
+    recOpen(r, end).forEach(d0 => {
+      const d = d0 < td ? td : d0, amt = convert(r.amount, recCur(r), from.currency, d0);
+      if (r.t == 'i') ev.push({ d, id: from.id, v: amt, name: r.name });
+      else if (r.t == 'e') ev.push({ d, id: from.id, v: -amt, name: r.name });
+      else if (r.t == 'tr') { const to = accs.find(a => a.id == r.accIdTo); ev.push({ d, id: from.id, v: -r.amount, name: r.name }); if (to) ev.push({ d, id: to.id, v: convert(r.amount, from.currency, to.currency, d0), name: r.name }); }
+      else if (r.t == 'g') { const g = goals.find(q => q.id == r.goalId), home = g && g.accId; if (home && home != from.id) { ev.push({ d, id: from.id, v: -r.amount, name: r.name }); ev.push({ d, id: home, v: convert(r.amount, from.currency, 'DOP', d0), name: r.name }); } }
+    });
+  });
+  accs.filter(isCard).forEach(a => {
+    const cy = cardCycle(a); if (!cy || cy.left <= 0 || cy.pay > end || paidByRec(a)) return;
+    const d = cy.pay < td ? td : cy.pay;
+    ev.push({ d, id: a.id, v: cy.left, name: 'Pago ' + a.name }); // la deuda baja…
+    ev.push({ d, id: null, v: -convert(cy.left, a.currency, 'DOP', td), name: 'Pago ' + a.name }); // …y sale de tus cuentas (sin cuenta fija)
+  });
+  ev.sort((x, y) => x.d.localeCompare(y.d));
+  const bal = Object.fromEntries(accs.map(a => [a.id, acctBalance(a)])), liq = new Set(liquidAccs().map(a => a.id));
+  let total = round2([...liq].reduce((s, id) => s + bal[id], 0));
+  const series = [], neg = {}; let i = 0, min = { d: td, v: total };
+  accs.forEach(a => { if (!isCard(a) && bal[a.id] < -0.005) neg[a.id] = { acc: a, d: td, v: bal[a.id], now: true }; }); // ya está en negativo hoy
+  for (let k = 0; k <= days; k++) {
+    const d = addDays(td, k);
+    while (i < ev.length && ev[i].d <= d) {
+      const e = ev[i++];
+      if (e.id == null) total += e.v;
+      else { bal[e.id] = round2((bal[e.id] || 0) + e.v); if (liq.has(e.id)) total += e.v; }
+      const a = e.id && accs.find(x => x.id == e.id);
+      if (a && !isCard(a) && bal[a.id] < -0.005) { if (!neg[a.id]) neg[a.id] = { acc: a, d, v: bal[a.id] }; else neg[a.id].v = Math.min(neg[a.id].v, bal[a.id]); }
+    }
+    if (k > 0 && daily) total -= daily; // gasto del día a día estimado
+    total = round2(total); series.push({ d, v: total });
+    if (total < min.v) min = { d, v: total };
+  }
+  return { series, min, end: series[series.length - 1], start: series[0], negatives: Object.values(neg), events: ev };
+}
+// Gasto del día a día: egresos que no vienen de un recurrente, promedio diario de los últimos 90 días
+function dailyVariable() {
+  const td = today(), first = txs.reduce((m, x) => (x.t == 'e' && (!m || x.d < m) ? x.d : m), null); if (!first) return 0;
+  const from = maxISO(first, addDays(td, -90)), days = daysBetween(from, td) + 1; if (days < 14) return 0;
+  return round2(txs.filter(x => x.t == 'e' && !x.rec && x.d >= from && x.d <= td).reduce((s, x) => s + x.v, 0) / days);
+}
+// Promedio por categoría de los 3 meses anteriores (solo desde que empezaste a anotar)
+function catCompare(ym, n = 3) {
+  const first = txs.reduce((m, x) => (x.t == 'e' && (!m || x.d < m) ? x.d : m), null); if (!first) return null;
+  const months = []; for (let k = 1; k <= n; k++) { const m = addMonths(ym, -k); if (m >= first.slice(0, 7)) months.push(m); }
+  if (!months.length) return null;
+  const tot = {}; txs.filter(x => x.t == 'e' && months.includes(x.d.slice(0, 7))).forEach(x => tot[x.c] = (tot[x.c] || 0) + x.v);
+  const cur = grp(txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), 'c');
+  const isCur = ym == today().slice(0, 7), frac = isCur ? +today().slice(8, 10) / +monthEnd(ym).slice(8, 10) : 1;
+  const rows = [...new Set([...Object.keys(tot), ...Object.keys(cur)])].map(c => {
+    const avg = round2((tot[c] || 0) / months.length), v = round2(cur[c] || 0);
+    return { c, v, avg, pct: avg ? Math.round((v - avg) / avg * 100) : null, pace: avg ? v / (avg * frac) : null };
+  }).sort((a, b) => b.v - a.v || b.avg - a.avg);
+  const avgTot = round2(rows.reduce((s, r) => s + r.avg, 0)), vTot = round2(rows.reduce((s, r) => s + r.v, 0));
+  return { months: months.length, frac, rows, avgTot, vTot };
+}
+// Fechas de un mes que caen en cierto día (para cortes y pagos de tarjetas y facturas)
+function daysOnMonth(day, ym) { const y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1; return new Date(Date.UTC(y, m, clampDay(y, m, +day))).toISOString().slice(0, 10); }
+// Eventos de un mes para el calendario de pagos
+function calendarEvents(ym) {
+  const from = ym + '-01', to = monthEnd(ym), td = today(), out = [];
+  recs.filter(r => r.active !== false).forEach(r => {
+    const rf = recFrom(r), done = r.done || [];
+    nextDates(r, maxISO(from, r.startDate || from), to).forEach(d => {
+      const ok = d < rf || done.includes(d);
+      out.push({ d, k: r.t, name: r.name, v: r.amount, cu: recCur(r), st: ok ? 'done' : d < td ? 'late' : 'next', rec: r.id, icon: recIcon(r) });
+    });
+    if (r.t == 'e' && r.cutDay) { const d = daysOnMonth(r.cutDay, ym); if (d >= (r.startDate || '')) out.push({ d, k: 'cut', name: 'Corte ' + r.name, st: d < td ? 'done' : 'next', icon: 'receipt' }); }
+  });
+  accs.filter(isCard).forEach(a => {
+    const cy = cardCycle(a);
+    if (a.payDay) { const d = daysOnMonth(a.payDay, ym); out.push({ d, k: 'pay', name: 'Pagar ' + a.name, v: cy && cy.pay == d ? cy.left : null, cu: a.currency, st: cy && cy.pay == d ? (cy.left <= 0 ? 'done' : d < td ? 'late' : 'next') : d < td ? 'done' : 'next', acc: a.id, icon: 'credit-card' }); }
+    if (a.cutDay) { const d = daysOnMonth(a.cutDay, ym); out.push({ d, k: 'cut', name: 'Corte ' + a.name, st: d < td ? 'done' : 'next', icon: 'credit-card' }); }
+  });
+  return out.sort((x, y) => x.d.localeCompare(y.d) || x.name.localeCompare(y.name));
+}
+

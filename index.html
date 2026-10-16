@@ -6,17 +6,51 @@
 <title>Mis finanzas</title>
 <meta name="description" content="Finanzas personales y de pareja: cuentas, presupuesto, recurrentes y metas.">
 <meta name="theme-color" content="#f6f4fa">
+<meta name="app-version" content="8.0.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Finanzas">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="manifest.webmanifest?v=8.0.0">
 <link rel="icon" href="icons/favicon.png" type="image/png">
 <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;600;800&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css">
+<link rel="stylesheet" href="css/app.css?v=8.0.0">
+<link rel="stylesheet" href="css/marca.css?v=8.0.0">
 <script>try{var d=document.documentElement;if(localStorage.getItem('fin_pin'))d.classList.add('locked');d.setAttribute('data-palette',localStorage.getItem('fin_palette')||'original');var t=localStorage.getItem('fin_theme');if(t=='claro')d.setAttribute('data-theme','light');else if(t=='dark')d.setAttribute('data-theme','dark')}catch(e){}</script>
+<script>
+/* Protección de arranque: si algún archivo no carga o falla, muestra qué pasó y un botón para reparar
+   (en vez de dejar la pantalla en blanco). */
+window.__V = {}; window.__ERRS = [];
+window.addEventListener('error', function (e) {
+  var t = e.target;
+  if (t && (t.tagName == 'SCRIPT' || t.tagName == 'LINK') && (t.src || t.href)) window.__ERRS.push('No se pudo cargar: ' + (t.src || t.href).split('/').slice(-2).join('/').split('?')[0]);
+  else if (e.message) window.__ERRS.push(e.message + (e.filename ? ' (' + e.filename.split('/').pop().split('?')[0] + ':' + e.lineno + ')' : ''));
+}, true);
+window.__repair = function () {
+  var go = function () { location.replace(location.pathname + '?r=' + Date.now()); };
+  try {
+    Promise.all([
+      navigator.serviceWorker ? navigator.serviceWorker.getRegistrations().then(function (rs) { return Promise.all(rs.map(function (r) { return r.unregister(); })); }) : 0,
+      window.caches ? caches.keys().then(function (ks) { return Promise.all(ks.map(function (k) { return caches.delete(k); })); }) : 0
+    ]).then(go, go);
+  } catch (e) { go(); }
+};
+window.__showFail = function (title, items) {
+  if (document.getElementById('bootfail')) return;
+  var esc = function (s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); };
+  var d = document.createElement('div'); d.id = 'bootfail';
+  d.setAttribute('style', 'position:fixed;inset:0;z-index:200;background:#f6f4fa;color:#231d2e;font:15px/1.5 system-ui,-apple-system,sans-serif;padding:24px;overflow:auto');
+  d.innerHTML = '<div style="max-width:520px;margin:30px auto"><h2 style="margin:0 0 8px">' + esc(title) + '</h2>' +
+    '<p>Casi siempre es porque el teléfono guardó archivos de la versión anterior, o porque algún archivo no se subió completo a GitHub. Tus datos están a salvo.</p>' +
+    (items && items.length ? '<ul style="background:#fff;border:1px solid #e6e1ee;border-radius:12px;padding:12px 12px 12px 30px;font-size:13px">' + items.map(function (i) { return '<li>' + esc(i) + '</li>'; }).join('') + '</ul>' : '') +
+    '<button onclick="__repair()" style="width:100%;min-height:48px;border:0;border-radius:12px;background:#5b3fd6;color:#fff;font:700 16px system-ui">Reparar y recargar</button>' +
+    '<p style="font-size:13px;color:#6f6780">Si después de reparar sigue saliendo este mensaje, toma una captura y envíala: dice exactamente qué archivo revisar.</p></div>';
+  document.body.appendChild(d);
+};
+window.addEventListener('load', function () { setTimeout(function () { if (!window.__booted) window.__showFail('La app no pudo arrancar', window.__ERRS.length ? window.__ERRS : ['Error desconocido']); }, 400); });
+</script>
 </head>
 <body>
 <main id="app"></main>
@@ -31,14 +65,17 @@
 <dialog id="dlg"></dialog>
 <dialog id="ask"></dialog>
 <div id="lock" hidden></div>
-<script src="vendor/chart.umd.js"></script>
-<script src="js/config.js"></script>
-<script src="js/core.js"></script>
-<script src="js/ui.js"></script>
-<script src="js/screens.js"></script>
-<script src="js/forms.js"></script>
-<script src="js/lock.js"></script>
-<script src="js/sync-ui.js"></script>
-<script type="module" src="js/cloud.js"></script>
+<script src="vendor/chart.umd.js?v=8.0.0"></script>
+<script src="js/config.js?v=8.0.0"></script>
+<script src="js/marca.js?v=8.0.0"></script>
+<script src="js/core.js?v=8.0.0"></script>
+<script src="js/ui.js?v=8.0.0"></script>
+<script src="js/screens.js?v=8.0.0"></script>
+<script src="js/forms.js?v=8.0.0"></script>
+<script src="js/plan.js?v=8.0.0"></script>
+<script src="js/extras.js?v=8.0.0"></script>
+<script src="js/lock.js?v=8.0.0"></script>
+<script src="js/sync-ui.js?v=8.0.0"></script>
+<script type="module" src="js/cloud.js?v=8.0.0"></script>
 </body>
 </html>

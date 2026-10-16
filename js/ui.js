@@ -1,4 +1,5 @@
 'use strict';
+(window.__V = window.__V || {})['ui.js'] = '8.0.0';
 /* Mis finanzas — utilidades de interfaz, acciones (guardar/borrar) y navegación. */
 const dlg = document.getElementById('dlg');
 const $ = id => document.getElementById(id);
@@ -94,20 +95,31 @@ function removeItem(kind, id) {
   const key = { acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' }[kind];
   const list = { accs, adjs, recs, goals }[key], it = list.find(x => x.id == id), ts = now();
   assign(key, list.filter(x => x.id != id));
-  dels[id] = ts; local(); if (it) cloudDel(kind, it, ts);
+  dels[id] = ts; if (it) { bin = bin.filter(x => x.id != id).concat({ k: kind, id, del: ts, d: deep(it) }); cloudDel(kind, it, ts); }
+  local();
+}
+// Restaura algo de la papelera (movimiento, cuenta, recurrente, meta o ajuste)
+function restoreItem(id) {
+  const t = trash.find(x => x.id == id);
+  if (t) { restoreTx(id); toast('Restaurado', { kind: 'ok' }); return; }
+  const b = bin.find(x => x.id == id); if (!b) return;
+  const key = { acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' }[b.k], list = { accs, adjs, recs, goals }[key];
+  const obj = (cleanState({ [key]: [{ ...b.d, id, u: now() }] })[key] || [])[0]; if (!obj) return fail('No se pudo restaurar.');
+  assign(key, list.filter(x => x.id != id).concat(obj)); bin = bin.filter(x => x.id != id); delete dels[id];
+  local(); cloudPut(b.k, obj); render(); toast('Restaurado', { kind: 'ok' });
 }
 async function resetAll() {
   const shared = cloudOn();
   if (!(await ask(shared ? 'Se borra TODO en la nube y en todos los teléfonos del hogar: cuentas, movimientos, metas, recurrentes y presupuesto.' : 'Se borra TODO en este teléfono: cuentas, movimientos, metas, recurrentes, presupuesto y categorías.', { title: '¿Borrar todos los datos?', ok: 'Sí, borrar', danger: true }))) return;
   if (!(await ask('No se puede deshacer, salvo importando un respaldo. ¿Ya descargaste uno?', { title: 'Última confirmación', ok: 'Borrar todo', danger: true }))) return;
   if (shared) window.Cloud.wipeAll(getAllItems());
-  setState({ cfg: fresh(), cfgT: now(), txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [] });
+  setState({ cfg: fresh(), cfgT: now(), txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [] });
   F = {}; local(); if (shared) cloudCfg(); go('home'); toast('Datos borrados');
 }
 
 // ============ navegación ============
 const NAV = ['home', 'hist', 'acc', 'bud', 'more'];
-const UNDER_MORE = ['more', 'rep', 'rec', 'goal', 'set', 'shared'];
+const UNDER_MORE = ['more', 'rep', 'rec', 'goal', 'set', 'shared', 'plan', 'trash'];
 function go(t) { tab = t; if (dlg.open) dlg.close(); render(); scrollTo(0, 0); }
 function pre(k) {
   const n = new Date(), y = n.getFullYear(), m = n.getMonth(), f = (mm, d) => new Date(Date.UTC(y, mm, d)).toISOString().slice(0, 10);
@@ -144,11 +156,22 @@ function render() {
   if (rb) { const n = pendingRecurring().length, old = rb.querySelector('.badge'); if (old) old.remove(); if (n) { const s = document.createElement('span'); s.className = 'badge'; s.textContent = n > 9 ? '9+' : n; rb.appendChild(s); } }
   ch.forEach(c => c.destroy()); ch = [];
   const app = $('app');
-  ({ home: renderHome, hist: renderHist, acc: renderAcc, bud: renderBud, more: renderMore, rep: renderRep, rec: renderRec, goal: renderGoal, set: renderSet, shared: renderShared }[tab] || renderHome)(app);
+  try {
+    document.documentElement.classList.toggle('wiz', tab == 'welcome');
+    ({ home: renderHome, hist: renderHist, acc: renderAcc, bud: renderBud, more: renderMore, rep: renderRep, rec: renderRec, goal: renderGoal, set: renderSet, shared: renderShared, plan: renderPlan, trash: renderTrash, welcome: renderWelcome }[tab] || renderHome)(app);
+  } catch (e) {
+    // Si una pantalla falla, se muestra el error en vez de dejar todo en blanco; el menú sigue funcionando
+    console.error(e);
+    app.innerHTML = `<div class="card" style="margin-top:20px"><h2 class="out"><i class="icon-alert-triangle"></i> Esta pantalla tuvo un problema</h2>
+<p class="mini">${esc(e && e.message || e)}</p><p class="mini">Prueba otra pestaña, o repara la app (tus datos están a salvo).</p>
+<button class="p" onclick="__repair()">Reparar y recargar</button></div>`;
+  }
 }
 
 // ============ paletas ============
-const PALETTES = {"original": {"name": "Original", "sw": ["#5b3fd6", "#b0447e", "#f6f4fa", "#178a5c"]}, "escudo": {"name": "Escudo Vélez García", "sw": ["#1f5a3c", "#1f3a68", "#b9b4a8", "#f3eee5"]}, "veranda": {"name": "Veranda", "sw": ["#6BB1AD", "#A7BCBD", "#EDECDB", "#E5A9A9", "#E6748E"]}, "cielo": {"name": "Cielo", "sw": ["#E2EFF6", "#B7D7EA", "#8DBEDC", "#64A4CE", "#4893C6"]}, "clasico": {"name": "Clásico", "sw": ["#4f5232", "#6b1e24", "#e2d6c3"]}, "winewood": {"name": "Winewood", "sw": ["#2A1016", "#51202C", "#6B3543", "#2F4736", "#586759"]}, "bosque": {"name": "Bosque", "sw": ["#005308", "#1C996B", "#780A39", "#F2D2CC", "#D84F7A"]}};
+const PALETTES = {"original": {"name": "Original", "sw": ["#5b3fd6", "#b0447e", "#f6f4fa", "#178a5c"]}, ...(window.MARCA && window.MARCA.paleta ? { escudo: window.MARCA.paleta } : {}), "veranda": {"name": "Veranda", "sw": ["#6BB1AD", "#A7BCBD", "#EDECDB", "#E5A9A9", "#E6748E"]}, "cielo": {"name": "Cielo", "sw": ["#E2EFF6", "#B7D7EA", "#8DBEDC", "#64A4CE", "#4893C6"]}, "clasico": {"name": "Clásico", "sw": ["#4f5232", "#6b1e24", "#e2d6c3"]}, "winewood": {"name": "Winewood", "sw": ["#2A1016", "#51202C", "#6B3543", "#2F4736", "#586759"]}, "bosque": {"name": "Bosque", "sw": ["#005308", "#1C996B", "#780A39", "#F2D2CC", "#D84F7A"]}};
+// La paleta del escudo depende de la marca (js/marca.js)
+const MARCA = window.MARCA || { nombre: '', paleta: null };
 let palette = 'original'; try { palette = localStorage.getItem('fin_palette') || 'original'; } catch (e) { }
 if (!PALETTES[palette]) palette = 'original';
 function setPalette(id) { if (!PALETTES[id]) return; palette = id; try { localStorage.setItem('fin_palette', id); } catch (e) { } applyTheme(); render(); toast('Paleta: ' + PALETTES[id].name, { kind: 'ok' }); }

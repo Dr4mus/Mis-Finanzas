@@ -1,4 +1,5 @@
 'use strict';
+(window.__V = window.__V || {})['screens.js'] = '8.0.0';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
@@ -59,31 +60,49 @@ function alertsHTML() {
     const p = Math.round((cs[c] || 0) / l * 100);
     out.push(`<div class="alert">${circ(c, icoFor(c, 'e'))}<div><b>${esc(c)}: ${p}% del tope</b><small>${money(cs[c] || 0)} de ${money(l)}</small>${bar(p, barCol(p >= 100 ? 'out' : 'yellow'))}</div></div>`);
   });
+  try {
+    projection(30).negatives.forEach(n => out.push(`<div class="alert">${circ(n.acc.name, 'alert-triangle')}<div><b>${esc(n.acc.name)} quedaría en negativo</b><small>${n.now ? 'Ya está en negativo' : 'Desde el ' + fdate(n.d) + ' con tus recurrentes'} · hasta ${money(n.v, n.acc.currency)}</small></div><button onclick="go('plan')">Ver</button></div>`));
+  } catch (e) { console.error(e); }
+  out.push(backupAlert());
   return out.join('');
 }
 function renderHome(app) {
-  const td = today(), ym = td.slice(0, 7), st = monthStats(ym), b = budgetFor(ym), bst = budgetStatus(st.exp, b.total);
-  const dim = +monthEnd(ym).slice(8, 10), dd = +td.slice(8, 10), pace = Math.round(dd / dim * 100), left = b.total - st.exp;
-  const col = bst ? barCol(bst.level) : 'var(--brand)', pct = bst ? Math.min(100, bst.pct) : 0;
-  const tot = totalsByCurrency(), dop = tot.DOP || { disp: 0, deuda: 0, neto: 0 }, others = Object.entries(tot).filter(([c]) => c != 'DOP');
-  const nw = others.length ? netWorthApprox() : null, me = myPerson(), al = alertsHTML();
-  const recent = txs.slice().sort((p, q) => q.d.localeCompare(p.d) || (q.cr || 0) - (p.cr || 0)).slice(0, 5);
-  app.innerHTML = `${head(`<span class="hello"><img class="crest-sm" src="icons/escudo-mini.webp" alt="">${me ? 'Hola, ' + esc(me) : 'Inicio'}</span>`)}
-<div class="card hero"><small>Disponible en pesos</small><div class="big">${money(dop.disp)}</div>
+  const td = today(), ym = td.slice(0, 7), me = myPerson();
+  const cards = {
+    saldo: () => {
+      const tot = totalsByCurrency(), dop = tot.DOP || { disp: 0, deuda: 0, neto: 0 }, others = Object.entries(tot).filter(([c]) => c != 'DOP'), nw = others.length ? netWorthApprox() : null;
+      return `<div class="card hero"><small>Disponible en pesos</small><div class="big">${money(dop.disp)}</div>
 <div class="split"><div><small>Patrimonio neto</small><b>${money(nw ? nw.total : dop.neto)}${nw ? '*' : ''}</b></div><div><small>Deuda en tarjetas</small><b>${money(dop.deuda)}</b></div></div>
 ${others.map(([c, t]) => `<small style="display:block;margin-top:6px">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}
-${nw ? `<small style="display:block;margin-top:2px">* Todo convertido a pesos${nw.missing.length ? ' (sin tasa para ' + nw.missing.join(', ') + ')' : ''}</small>` : ''}</div>
-<div class="card"><h2><i class="icon-pie-chart"></i> ${ymLabel(ym)[0].toUpperCase() + ymLabel(ym).slice(1)}</h2>
+${nw ? `<small style="display:block;margin-top:2px">* Todo convertido a pesos${nw.missing.length ? ' (sin tasa para ' + nw.missing.join(', ') + ')' : ''}</small>` : ''}</div>`;
+    },
+    alcanza: () => alcanzaCard(false),
+    atajos: () => atajosCard(),
+    mes: () => {
+      const st = monthStats(ym), b = budgetFor(ym), bst = budgetStatus(st.exp, b.total);
+      const dim = +monthEnd(ym).slice(8, 10), dd = +td.slice(8, 10), pace = Math.round(dd / dim * 100), left = b.total - st.exp;
+      const col = bst ? barCol(bst.level) : 'var(--brand)', pct = bst ? Math.min(100, bst.pct) : 0;
+      return `<div class="card"><h2><i class="icon-pie-chart"></i> ${ymLabel(ym)[0].toUpperCase() + ymLabel(ym).slice(1)}</h2>
 <div class="month"><div class="ring" style="background:conic-gradient(${col} ${pct}%,var(--soft) 0)"><div>${bst ? bst.pct + '%' : '—'}</div></div>
 <div style="min-width:0;flex:1"><small class="mut">${b.total ? (left >= 0 ? 'Te queda para gastar' : 'Te pasaste por') : 'Gastado este mes'}</small>
 <div class="num" style="font-size:24px;font-weight:800;color:${left < 0 && b.total ? 'var(--out)' : 'var(--ink)'}">${money(b.total ? Math.abs(left) : st.exp)}</div>
 <small class="mut">${b.total ? money(st.exp) + ' de ' + money(b.total) : `<button class="link" onclick="go('bud')">Define un tope</button>`}</small></div></div>
 <div style="margin-top:12px"><small class="mut">Día ${dd} de ${dim}${bst && bst.pct > pace + 10 ? ' · <b class="warn">vas más rápido que el mes</b>' : ''}</small>${bar(pace, 'var(--brand)')}</div>
-<div class="trio"><div><small>Ingresos</small><b class="in">${money(st.inc)}</b></div><div><small>Egresos</small><b class="out">${money(st.exp)}</b></div><div><small>Ahorro</small><b>${st.rate == null ? '—' : st.rate + '%'}</b></div></div></div>
-<div class="grid"><div class="card"><h2><i class="icon-calendar"></i> Pendientes y alertas</h2>${al || '<p class="mut" style="margin:0">Todo tranquilo: nada pendiente ni cerca del límite.</p>'}</div>
-${goals.length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${goals.map(g => { const p = goalProgress(g), c = accentFor(g.name); return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:700">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}</small></div>`; }).join('')}<button class="link" onclick="go('goal')">Ver metas</button></div>` : ''}</div>
-<div class="card"><h2><i class="icon-list"></i> Últimos movimientos</h2>${recent.length ? recent.map(x => histRow(x)).join('') + `<button class="link" onclick="go('hist')">Ver historial</button>` : '<p class="empty">Aún no hay movimientos. Toca “+ Movimiento” para empezar.</p>'}</div>
-<button style="width:100%" onclick="go('rep')"><i class="icon-bar-chart-3"></i> Ver reportes y gráficas</button>`;
+<div class="trio"><div><small>Ingresos</small><b class="in">${money(st.inc)}</b></div><div><small>Egresos</small><b class="out">${money(st.exp)}</b></div><div><small>Ahorro</small><b>${st.rate == null ? '—' : st.rate + '%'}</b></div></div></div>`;
+    },
+    alertas: () => { const al = alertsHTML(); return `<div class="card"><h2><i class="icon-calendar"></i> Pendientes y alertas</h2>${al || '<p class="mut" style="margin:0">Todo tranquilo: nada pendiente ni cerca del límite.</p>'}</div>`; },
+    promedio: () => promedioCard(),
+    metas: () => goals.length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${goals.map(g => { const p = goalProgress(g), c = accentFor(g.name); return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:700">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}</small></div>`; }).join('')}<button class="link" onclick="go('goal')">Ver metas</button></div>` : '',
+    recientes: () => {
+      const recent = txs.slice().sort((p, q) => q.d.localeCompare(p.d) || (q.cr || 0) - (p.cr || 0)).slice(0, 5);
+      return `<div class="card"><h2><i class="icon-list"></i> Últimos movimientos</h2>${recent.length ? recent.map(x => histRow(x)).join('') + `<button class="link" onclick="go('hist')">Ver historial</button>` : '<p class="empty">Aún no hay movimientos. Toca “+ Movimiento” para empezar.</p>'}</div>`;
+    }
+  };
+  const body = homeLayout().filter(c => c.on && cards[c.id]).map(c => { try { return cards[c.id](); } catch (e) { console.error(e); return `<div class="card"><p class="warnline" style="margin:0">No se pudo mostrar esta tarjeta: ${esc(e.message)}</p></div>`; } }).join('');
+  app.innerHTML = `${head(`<span class="hello"><img class="crest-sm" src="icons/escudo-mini.webp" alt="">${me ? 'Hola, ' + esc(me) : 'Inicio'}</span>`)}
+${body}
+<div class="seg" style="margin-top:4px"><button onclick="go('rep')"><i class="icon-bar-chart-3"></i> Reportes</button><button onclick="go('plan')"><i class="icon-calendar-days"></i> Planificar</button></div>
+<button class="link" style="margin:6px auto 0;display:flex" onclick="openHomeEdit()"><i class="icon-sliders"></i> Personalizar Inicio</button>`;
 }
 
 // ============ Reportes ============
@@ -101,6 +120,7 @@ function renderRep(app) {
 <div class="card"><h2>Patrimonio neto (12 meses)</h2><canvas id="c-nw"></canvas><p class="mini" style="margin:6px 0 0">En pesos, convirtiendo otras monedas con tu tasa de referencia o la última conocida.</p></div>
 <div class="grid"><div class="card"><h2>Egresos por categoría</h2>${ec.length ? `<canvas id="c-pie"></canvas><div id="catlist"></div>` : '<p class="empty">Sin egresos este mes.</p>'}</div>
 <div class="card"><h2>Este mes vs el anterior</h2><canvas id="c-cmp"></canvas></div></div>
+${compareTable(ym)}
 <div class="card"><h2>Por persona</h2><canvas id="c-person"></canvas></div>
 <details class="card"${F.open ? ' open' : ''}><summary>Explorar con filtros ›</summary><div style="margin-top:10px">${fbar(false)}</div>
 ${a.length ? `<canvas id="c1" style="margin-top:12px"></canvas>` : '<p class="empty">No hay movimientos con estos filtros.</p>'}</details>`;
@@ -215,12 +235,14 @@ function renderMore(app) {
   const pend = pendingRecurring().length;
   const tile = (t, ic, title, sub, badge) => `<button class="tile" onclick="go('${t}')"><div class="circ tint" style="--c:var(--brand)"><i class="icon-${ic}"></i>${badge ? `<span class="badge">${badge}</span>` : ''}</div><div><b>${title}</b><br><small>${sub}</small></div></button>`;
   const st = settlements();
-  app.innerHTML = `${head('Más')}<div class="card crest-card"><img src="icons/escudo.webp" alt="Escudo Vélez García" loading="lazy"></div><div class="tiles">
+  app.innerHTML = `${head('Más')}<div class="card crest-card"><img src="icons/escudo.webp" alt="${esc(MARCA.nombre ? 'Escudo ' + MARCA.nombre : 'Escudo')}" loading="lazy"></div><div class="tiles">
+${tile('plan', 'calendar-days', 'Planificar', 'Te alcanza, proyección y calendario')}
 ${tile('rep', 'bar-chart-3', 'Reportes', 'Gráficas y resumen mensual')}
 ${tile('rec', 'repeat', 'Recurrentes', pend ? pend + ' por confirmar' : 'Pagos, ingresos y aportes fijos', pend)}
 ${tile('goal', 'target', 'Metas', goals.length ? goals.length + ' meta' + (goals.length > 1 ? 's' : '') : 'Ahorra para algo')}
 ${tile('shared', 'users', 'Cuentas claras', st.length ? esc(st[0].from) + ' debe ' + money(st[0].amount) : 'Gastos compartidos al día')}
-${tile('set', 'settings', 'Ajustes', 'Nube, seguridad, categorías')}</div>`;
+${tile('set', 'settings', 'Ajustes', 'Nube, seguridad, atajos, categorías')}
+${tile('trash', 'archive', 'Papelera', (() => { const n = trashItems().length; return n ? n + ' en los últimos ' + KEEP_DAYS + ' días' : 'Recupera lo que borraste'; })())}</div>`;
 }
 
 // ============ Recurrentes ============
@@ -295,6 +317,7 @@ ${securitySection()}
 <div class="tags">${cfg.people.map(p => `<button onclick="openPersonEdit(this.dataset.n)" data-n="${esc(p)}"><i class="icon-user"></i>${esc(p)}${p == me ? ' <span class="pill">tú</span>' : ''}</button>`).join('')}</div>
 <div class="add"><input id="a-people" placeholder="Agregar persona…" onkeydown="if(event.key=='Enter')ad('people')"><button class="p" onclick="ad('people')">Agregar</button></div>
 ${cloudOn() ? '' : `<label style="margin-top:10px">Este teléfono es de (se elige solo en “Quién”)<select onchange="setMyPerson(this.value);render()"><option value="">Nadie en particular</option>${opts(cfg.people, me)}</select></label>`}</div>
+${shortcutsSection()}
 ${catCard('Categorías de egreso', 'e')}${catCard('Categorías de ingreso', 'i')}
 <div class="card"><h2><i class="icon-banknote"></i> Monedas y tasas</h2><p class="mini" style="margin:0 0 8px">La tasa de referencia se usa para convertir tus saldos en otras monedas al patrimonio, y como sugerencia en los formularios.</p>
 ${cfg.cur.map(c => `<div class="row"><div><b>${c}</b><small>Última tasa usada: ${rateOf(c) && rateOf(c) != refRate(c) ? rateOf(c) : '—'}</small></div><input type="number" inputmode="decimal" step="0.0001" min="0" style="width:120px" placeholder="1 ${c} = ? DOP" value="${(cfg.rates || {})[c] || ''}" onchange="setRefRate('${c}',this.value)"><button class="d" aria-label="Quitar ${c}" onclick="rm('cur','${c}')"><i class="icon-x"></i></button></div>`).join('')}
@@ -313,7 +336,8 @@ ${cfg.cur.map(c => `<div class="row"><div><b>${c}</b><small>Última tasa usada: 
 <label style="margin-top:8px">O pega el texto<textarea id="paste" rows="3"></textarea></label>
 <div class="add" style="margin-top:8px;flex-wrap:wrap"><button class="p" onclick="merge($('paste').value,$('rp').checked)">Importar texto</button><label class="toggle"><input type="checkbox" id="rp">Reemplazar todo</label></div></details></div>
 <div class="card"><h2 class="out"><i class="icon-trash-2"></i> Empezar de cero</h2><p class="mini" style="margin:0 0 8px">${cloudOn() ? 'Borra los datos del hogar en la nube y en todos sus teléfonos.' : 'Borra los datos de este teléfono.'} Descarga un respaldo antes.</p><button class="d" onclick="resetAll()">Borrar todos los datos</button></div>
-<p class="mini" style="text-align:center">Mis finanzas · versión ${APP_VERSION}</p>`;
+<div class="add" style="flex-wrap:wrap;justify-content:center"><button class="link" onclick="go('trash')"><i class="icon-archive"></i> Papelera</button><button class="link" onclick="openHomeEdit()"><i class="icon-sliders"></i> Personalizar Inicio</button><button class="link" onclick="wz={step:0,force:true};go('welcome')"><i class="icon-sparkles"></i> Ver la bienvenida</button></div>
+<p class="mini" style="text-align:center">Mis finanzas${MARCA.nombre ? ' · ' + esc(MARCA.nombre) : ''} · versión ${APP_VERSION}</p>`;
 }
 function catCard(title, t) {
   return `<div class="card"><h2><i class="icon-tag"></i> ${title}</h2><p class="mini" style="margin:0 0 6px">Toca una para renombrarla, cambiar su ícono o sus subcategorías.</p>

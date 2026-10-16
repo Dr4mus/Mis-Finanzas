@@ -1,4 +1,5 @@
 'use strict';
+(window.__V = window.__V || {})['forms.js'] = '8.0.0';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
 function mvTabs(c) { return `<div class="seg sm">${[['m', 'Ingreso / Egreso', 'openForm()'], ['t', 'Transferir', 'goTr()'], ['g', 'Metas', 'openContribForm()']].map(([k, l, fn]) => `<button type="button" class="${c == k ? 'on' : ''}" onclick="${fn}">${l}</button>`).join('')}</div>`; }
@@ -46,6 +47,7 @@ ${ac ? `<label>Monto que ${f.t == 'e' ? 'sale de' : 'entra a'} la cuenta (${ac.c
 <div><small class="mut">${f.t == 'e' ? 'Quién pagó' : 'Quién'}</small><div class="chips" style="margin-top:4px">${ppl.map(p => `<button type="button" class="${p == f.w ? 'on' : ''}" data-p="${esc(p)}" onclick="fm.w=this.dataset.p;if(fm.split=='for:'+fm.w)fm.split='';drawForm()">${esc(p)}</button>`).join('')}</div></div>
 ${f.t == 'e' && cfg.people.length > 1 ? `<div><small class="mut">¿Para quién?</small><div class="chips" style="margin-top:4px">${[['', 'Personal'], ['half', 'Compartido'], ...cfg.people.filter(p => p != f.w).map(p => ['for:' + p, 'Para ' + p])].map(([v, l]) => `<button type="button" class="${(f.split || '') == v ? 'on' : ''}" data-v="${esc(v)}" onclick="fm.split=this.dataset.v;drawForm()">${esc(l)}</button>`).join('')}</div>${f.split ? `<small class="mini">${f.split == 'half' ? 'Se divide entre ' + cfg.people.length + ': cada quien pone ' + money((+f.a || 0) / cfg.people.length) + '.' : esc(f.split.slice(4)) + ' le deberá el total a ' + esc(f.w) + '.'} Lo ves en Más → Cuentas claras.</small>` : ''}</div>` : ''}
 <input value="${esc(f.n)}" oninput="fm.n=this.value" placeholder="Nota (opcional)" aria-label="Nota">
+${f.id ? '' : `<button type="button" class="link" style="justify-self:start" onclick="shortcutFromForm()"><i class="icon-zap"></i> Crear un atajo con esto</button>`}
 ${footer(f.id, `delTx('${f.id}')`, `<button type="button" onclick="dupTx()"><i class="icon-copy"></i> Duplicar</button>`)}</form>`;
   dlgShow();
 }
@@ -506,6 +508,7 @@ function mergeCfg(mine, theirs, theirsNewer) {
   const base = theirsNewer ? deep(theirs) : deep(mine), other = theirsNewer ? mine : theirs;
   for (const c of other.cats || []) if (!base.cats.some(x => x.n == c.n && x.t == c.t)) base.cats.push(c);
   for (const k of ['people', 'cur', 'accTypes']) base[k] = [...new Set([...(base[k] || []), ...(other[k] || [])])];
+  base.shortcuts = [...(base.shortcuts || []), ...(other.shortcuts || []).filter(x => !(base.shortcuts || []).some(y => y.id == x.id))];
   base.subs = { ...(other.subs || {}), ...(base.subs || {}) };
   base.rates = { ...(other.rates || {}), ...(base.rates || {}) };
   return base;
@@ -525,10 +528,12 @@ async function merge(s, rep) {
     let a = 0, u = 0; const m = new Map(txs.map(x => [x.id, x]));
     inc.txs.forEach(x => { const y = m.get(x.id); if (!y) { m.set(x.id, x); a++; } else if ((x.u || 0) > (y.u || 0)) { m.set(x.id, x); u++; } });
     const tm = new Map(trash.map(x => [x.id, x])); inc.trash.forEach(x => { const y = tm.get(x.id); if (!y || (x.del || 0) > (y.del || 0)) tm.set(x.id, x); });
+    const bm = new Map(bin.map(x => [x.id, x])); inc.bin.forEach(x => { const y = bm.get(x.id); if (!y || (x.del || 0) > (y.del || 0)) bm.set(x.id, x); }); bin = [...bm.values()];
     Object.entries(d).forEach(([k, v]) => { const y = m.get(k); if (y && v >= (y.u || 0)) { tm.set(k, { ...y, del: v }); m.delete(k); } });
     dels = d; txs = [...m.values()]; trash = [...tm.values()].filter(x => !(m.has(x.id) && (m.get(x.id).u || 0) > (x.del || 0)));
     const alive = x => !(d[x.id] && d[x.id] >= lu(x));
     accs = mrg(accs, inc.accs).filter(alive); adjs = mrg(adjs, inc.adjs).filter(alive); recs = mrg(recs, inc.recs).filter(alive); goals = mrg(goals, inc.goals).filter(alive);
+    const live = new Set([...accs, ...adjs, ...recs, ...goals].map(x => x.id)); bin = bin.filter(x => !live.has(x.id)); purgeOld();
     cfg = wasEmpty ? inc.cfg : mergeCfg(cfg, inc.cfg, inc.cfgT > cfgT); cfgT = now();
     toast(`Listo: ${a} movimientos nuevos y ${u} actualizados.`, { kind: 'ok', ms: 5000 });
   }
@@ -546,9 +551,11 @@ function download(filename, data, mime) {
   a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 4000);
 }
-function bk() { download('finanzas-respaldo-' + today() + '.json', pack(), 'application/json'); }
+// Recordatorio de respaldo: se guarda cuándo fue el último
+const markBackup = () => { try { localStorage.setItem('fin_lastbk', String(Date.now())); localStorage.removeItem('fin_bk_snooze'); } catch (e) { } };
+function bk() { download('finanzas-respaldo-' + today() + '.json', pack(), 'application/json'); markBackup(); }
 function cp() {
-  const t = pack(), ok1 = () => toast('Respaldo copiado. Pégalo en WhatsApp, un correo o la otra app.', { kind: 'ok' });
+  const t = pack(), ok1 = () => { markBackup(); toast('Respaldo copiado. Pégalo en WhatsApp, un correo o la otra app.', { kind: 'ok' }); };
   const fb = () => { const ta = $('paste'); if (!ta) return fail('No se pudo copiar.'); ta.closest('details') && (ta.closest('details').open = true); ta.value = t; ta.focus(); ta.select(); let ok = false; try { ok = document.execCommand('copy'); } catch (e) { } ok ? ok1() : toast('Copia el texto de la caja (mantén presionado → Copiar).'); };
   try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(ok1, fb); else fb(); } catch (e) { fb(); }
 }

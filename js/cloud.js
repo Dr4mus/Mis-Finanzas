@@ -1,6 +1,8 @@
+(window.__V = window.__V || {})['cloud.js'] = '8.0.0';
 /* Mis finanzas — sincronización con Firebase (Auth + Firestore).
    Solo se activa si js/config.js tiene la configuración de tu proyecto. */
-const conf = window.FIREBASE_CONFIG;
+// Acepta window.FIREBASE_CONFIG = {...} o el bloque tal cual lo da Firebase: const firebaseConfig = {...};
+const conf = window.FIREBASE_CONFIG || (typeof firebaseConfig != 'undefined' ? firebaseConfig : null);
 const C = window.Cloud = { enabled: !!(conf && conf.apiKey && conf.projectId), ready: false, user: null, uid: null, hid: null, status: '', error: '', active: false, myName: '', members: [], names: {}, joinCode: null };
 const notify = k => { try { window.onCloudChange && window.onCloudChange(k); } catch (e) { console.error(e); } };
 const HID_KEY = 'fin_hid';
@@ -18,7 +20,7 @@ const msg = e => ERR[e && e.code] || (e && e.message) || String(e);
 if (C.enabled) start().catch(e => { C.ready = true; C.error = 'No se pudo iniciar la nube: ' + msg(e); notify('state'); });
 
 async function start() {
-  const fb = await import('../vendor/firebase.js');
+  const fb = await import('../vendor/firebase.js?v=8.0.0');
   const app = fb.initializeApp(conf);
   let auth; try { auth = fb.initializeAuth(app, { persistence: [fb.indexedDBLocalPersistence, fb.browserLocalPersistence] }); } catch (e) { auth = fb.getAuth(app); }
   let db; try { db = fb.initializeFirestore(app, { localCache: fb.persistentLocalCache({ tabManager: fb.persistentMultipleTabManager() }) }); } catch (e) { db = fb.initializeFirestore(app, {}); }
@@ -155,7 +157,8 @@ async function start() {
     },
     // Escrituras: no se esperan; Firestore las guarda y las envía cuando haya internet.
     put(k, obj) { if (!C.hid) return; const { id, del, ...d } = obj; fb.setDoc(itemRef(id), wrap({ k, u: obj.u || obj.createdAt || Date.now(), del: null, d: strip(d) })).catch(fail); },
-    del(k, obj, ts) { if (!C.hid) return; const { id, del, ...d } = obj; fb.setDoc(itemRef(id), wrap({ k, u: ts, del: ts, d: k == 'tx' ? strip(d) : null })).catch(fail); },
+    // Al borrar se guarda una copia (para la papelera de 30 días en todos los teléfonos)
+    del(k, obj, ts) { if (!C.hid) return; const { id, del, ...d } = obj; fb.setDoc(itemRef(id), wrap({ k, u: ts, del: ts, d: strip(d) })).catch(fail); },
     putCfg(cfg, t) { if (!C.hid) return; fb.setDoc(itemRef('cfg'), wrap({ k: 'cfg', u: t || Date.now(), del: null, d: strip(cfg) })).catch(fail); },
     pushItems(list) {
       if (!C.hid) return;

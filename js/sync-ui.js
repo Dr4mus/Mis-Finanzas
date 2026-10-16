@@ -1,6 +1,7 @@
 'use strict';
+(window.__V = window.__V || {})['sync-ui.js'] = '8.0.0';
 /* Mis finanzas — interfaz de la nube, aplicación de cambios remotos y arranque. */
-const APP_VERSION = '7.0.0';
+const APP_VERSION = '8.0.0';
 const KIND_KEY = { tx: 'txs', acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' };
 const strip = o => JSON.parse(JSON.stringify(o)); // Firestore no acepta "undefined"
 
@@ -10,7 +11,8 @@ function getAllItems() {
   const it = toItem;
   return [
     ...txs.map(x => it('tx', x)), ...trash.map(x => it('tx', x, x.del || 1)),
-    ...accs.map(x => it('acc', x)), ...adjs.map(x => it('adj', x)), ...recs.map(x => it('rec', x)), ...goals.map(x => it('goal', x))
+    ...accs.map(x => it('acc', x)), ...adjs.map(x => it('adj', x)), ...recs.map(x => it('rec', x)), ...goals.map(x => it('goal', x)),
+    ...bin.map(x => ({ id: x.id, k: x.k, u: x.del, del: x.del, d: strip(x.d) }))
   ];
 }
 
@@ -32,12 +34,13 @@ function applyRemote(list) {
       dels[id] = data.del;
       const rest = list0.filter(x => x.id != id);
       if (key == 'txs') { txs = rest; if (data.d) { const t = cleanTx({ ...data.d, id }); if (t) trash = trash.filter(x => x.id != id).concat({ ...t, del: data.del }); } }
-      else assign(key, rest);
+      else { assign(key, rest); if (data.d) bin = bin.filter(x => x.id != id).concat({ k: data.k, id, del: data.del, d: data.d }); }
       changed = true;
     } else {
       const lu = cur ? (cur.u || cur.createdAt || 0) : 0;
       if (cur && lu >= ru) continue; // ya lo tengo igual o más nuevo
-      if (!cur && inTrash && (inTrash.del || 0) > ru) continue;
+      if (!cur && ((inTrash && (inTrash.del || 0) > ru) || (dels[id] || 0) > ru)) continue; // se borró después de esta versión
+      if (key != 'txs') bin = bin.filter(x => x.id != id);
       let obj = { ...data.d, id };
       if (key == 'txs') { obj = cleanTx(obj); if (!obj) continue; trash = trash.filter(x => x.id != id); }
       else obj = (cleanState({ [key]: [obj] })[key] || [])[0];
@@ -46,7 +49,7 @@ function applyRemote(list) {
       delete dels[id]; changed = true;
     }
   }
-  if (changed) { local(); render(); }
+  if (changed) { purgeOld(); local(); render(); }
 }
 function assign(key, v) { if (key == 'txs') txs = v; else if (key == 'accs') accs = v; else if (key == 'adjs') adjs = v; else if (key == 'recs') recs = v; else goals = v; }
 
@@ -60,7 +63,7 @@ function ensureMe() {
   saveCfg(c);
 }
 function hasLocalData() { return txs.length + trash.length + accs.length + goals.length + recs.length + adjs.length > 0; }
-function resetLocalData() { setState({ cfg: fresh(), cfgT: 0, txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [] }); local(); render(); }
+function resetLocalData() { setState({ cfg: fresh(), cfgT: 0, txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [] }); local(); render(); }
 function currentCfg() { return deep(cfg); }
 function mergeCloudCfg(localCfg, remoteHas) {
   if (!localCfg) return;
@@ -78,7 +81,12 @@ function syncBadge() {
 function cloudSection() {
   const C = window.Cloud;
   const head = '<h2><i class="icon-cloud"></i> Nube y hogar</h2>';
-  if (!C || !C.enabled) return `<div class="card">${head}<p class="mini" style="margin:0">Aún no está configurada: los datos se guardan solo en este teléfono. Sigue la guía “Configurar Firebase” del README y pega tu configuración en <code>js/config.js</code>.</p></div>`;
+  if (!C || !C.enabled) {
+    const bad = (window.__ERRS || []).find(e => /config\.js/.test(e)), missing = bad && /No se pudo cargar/.test(bad);
+    const msg = !bad ? '' : missing ? `<p class="mini" style="margin:0 0 8px">Todavía no hay un archivo <code>js/config.js</code> en tu GitHub. Se crea en el paso “Conectar la app con tu Firebase” de la guía.</p>`
+      : `<p class="warnline" style="margin:0 0 8px">Tu archivo <code>js/config.js</code> tiene un error: ${esc(bad)}. Copia solo el bloque <code>const firebaseConfig = { … };</code> de Firebase (sin las líneas <code>import</code>).</p>`;
+    return `<div class="card">${head}${msg}<p class="mini" style="margin:0">Aún no está configurada: los datos se guardan solo en este teléfono. Para activarla, sigue la guía PDF (parte “Firebase”) y pega tu configuración en <code>js/config.js</code> en GitHub.</p></div>`;
+  }
   if (!C.ready) return `<div class="card">${head}<p class="mini">Conectando…</p></div>`;
   const err = C.error ? `<p class="warnline" style="margin:6px 0">${esc(C.error)}</p>` : '';
   if (!C.user) return `<div class="card">${head}<p class="mini" style="margin:0 0 8px">Entra con tu correo. Cada uno usa su propia cuenta y luego se unen al mismo hogar.</p>${err}
@@ -136,7 +144,15 @@ window.onCloudChange = kind => {
 window.ask = ask;
 
 // ============ arranque ============
-applyTheme(); render();
+// Verifica que todos los archivos sean de la misma versión (evita la pantalla en blanco por archivos viejos)
+(function boot() {
+  const want = (document.querySelector('meta[name=app-version]') || {}).content || APP_VERSION;
+  const bad = ['core.js', 'ui.js', 'screens.js', 'forms.js', 'plan.js', 'extras.js', 'lock.js', 'sync-ui.js'].filter(f => window.__V[f] != want)
+    .map(f => window.__V[f] ? `js/${f} es de la versión ${window.__V[f]} (se esperaba ${want})` : `js/${f} no cargó o es de una versión anterior`);
+  if (bad.length) { window.__showFail('Hay archivos de versiones distintas', bad.concat(window.__ERRS)); return; }
+  try { if (shouldWelcome()) tab = 'welcome'; applyTheme(); render(); window.__booted = true; }
+  catch (e) { console.error(e); window.__showFail('La app no pudo arrancar', [String(e && e.message || e)].concat(window.__ERRS)); }
+})();
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
