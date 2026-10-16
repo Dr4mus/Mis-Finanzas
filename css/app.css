@@ -281,3 +281,6 @@ html.wiz nav,html.wiz .fab{display:none}
 .card .kp>div{box-shadow:none;background:var(--soft);border-color:transparent}
 .alert.bka{flex-wrap:wrap}.alert.bka .acts2{display:flex;gap:6px;flex-basis:100%;padding-left:54px}.alert.bka .acts2 button{flex:1}
 .wlist span{flex:1;min-width:0}
+#lock .biobtn{display:flex;align-items:center;gap:8px;font-size:16px;padding:12px 20px;border-radius:99px}#lock .biobtn i{font-size:22px}
+#lock>p{text-align:center;max-width:320px}
+@media(max-height:720px){#lock{gap:10px}#lock img{width:78px}.keypad{gap:10px}.keypad button{height:62px}.keypad{grid-template-columns:repeat(3,62px)}}

@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['lock.js'] = '8.0.0';
+(window.__V = window.__V || {})['lock.js'] = '8.0.1';
 /* Mis finanzas — bloqueo con PIN y Face ID / huella (WebAuthn del propio teléfono).
    Es un bloqueo local de la app en este teléfono; los datos de la nube además requieren tu cuenta. */
 const LOCK = { key: 'fin_pin', bio: 'fin_bio', after: 'fin_lock_after' };
@@ -12,20 +12,26 @@ const unb64 = s => { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.lengt
 const rand = n => crypto.getRandomValues(new Uint8Array(n));
 async function hashPin(pin, salt) { return b64(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(salt + ':' + pin))); }
 
-let lockEntry = '', lockFails = 0, lockUntil = 0, hiddenAt = 0, BIO_OK = null;
+let lockEntry = '', lockFails = 0, lockUntil = 0, hiddenAt = 0, BIO_OK = null, bioBusy = false, bioTried = false;
 const isLocked = () => !$('lock').hidden;
 function showLock() {
   if (!lockCfg()) return;
   if (dlg.open) dlg.close();
   document.documentElement.classList.add('locked');
-  $('lock').hidden = false; lockEntry = ''; drawLock();
-  // En Android se puede pedir la huella de una vez; en iPhone hay que tocar el botón
-  if (bioId() && !/iPhone|iPad|iPod/.test(navigator.userAgent)) setTimeout(bioUnlock, 350);
+  $('lock').hidden = false; lockEntry = ''; bioTried = false; drawLock();
+  setTimeout(autoBio, 350);
+}
+// Pide Face ID / huella sola al abrir o al volver a la app (Android, y iPhone con iOS 16 o más nuevo).
+// Si el teléfono no lo permite sin un toque, queda el botón grande "Desbloquear con Face ID / huella".
+function autoBio() {
+  if (!bioId() || !isLocked() || bioBusy || bioTried || document.visibilityState != 'visible') return;
+  bioTried = true; bioUnlock(true);
 }
 function drawLock(msg, shake) {
   const c = lockCfg(), L = c ? c.len : 4;
   $('lock').innerHTML = `<img src="icons/escudo.webp" alt=""><h2>Mis finanzas</h2>
-<p class="mut" style="margin:0;min-height:20px">${msg || 'Escribe tu PIN'}</p>
+<p class="mut" style="margin:0;min-height:20px">${msg || (bioId() ? 'Usa Face ID / huella o escribe tu PIN' : 'Escribe tu PIN')}</p>
+${bioId() ? `<button class="p biobtn" onclick="bioUnlock()"><i class="icon-scan-face"></i> Desbloquear con Face ID / huella</button>` : ''}
 <div class="dots${shake ? ' shake' : ''}">${[...Array(L)].map((_, i) => `<span class="${i < lockEntry.length ? 'f' : ''}"></span>`).join('')}</div>
 <div class="keypad">${[1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => `<button onclick="lockKey('${n}')">${n}</button>`).join('')}
 ${bioId() ? `<button class="ghost" onclick="bioUnlock()" aria-label="Face ID o huella"><i class="icon-scan-face" style="font-size:30px"></i></button>` : '<span></span>'}
@@ -44,12 +50,14 @@ async function lockKey(k) {
   drawLock('PIN incorrecto', true);
 }
 function unlock() { $('lock').hidden = true; document.documentElement.classList.remove('locked'); lockEntry = ''; lockFails = 0; }
-async function bioUnlock() {
-  const id = bioId(); if (!id || !isLocked()) return;
+async function bioUnlock(auto) {
+  const id = bioId(); if (!id || !isLocked() || bioBusy) return;
+  bioBusy = true;
   try {
     await navigator.credentials.get({ publicKey: { challenge: rand(32), allowCredentials: [{ type: 'public-key', id: unb64(id), transports: ['internal', 'hybrid'] }], userVerification: 'required', timeout: 60000 } });
     unlock();
-  } catch (e) { drawLock('Usa tu PIN'); }
+  } catch (e) { if (isLocked()) drawLock(auto ? 'Toca el botón para usar Face ID / huella, o escribe tu PIN' : 'No se pudo. Inténtalo otra vez o usa tu PIN'); }
+  finally { bioBusy = false; }
 }
 async function bioAvailable() { try { return !!(window.PublicKeyCredential && await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()); } catch (e) { return false; } }
 async function enrollBio() {
@@ -93,7 +101,8 @@ ${c ? `<div class="row"><div><b>Face ID / huella</b><small>${BIO_OK === false &&
 document.addEventListener('visibilitychange', () => {
   if (!lockCfg()) return;
   if (document.hidden) { hiddenAt = Date.now(); if (lockAfter() == 0) showLock(); }
-  else if (hiddenAt && Date.now() - hiddenAt >= lockAfter() * 1000) showLock();
+  else if (hiddenAt && Date.now() - hiddenAt >= lockAfter() * 1000 && !isLocked()) showLock();
+  else if (isLocked()) { bioTried = false; setTimeout(autoBio, 350); } // volvió a la app con la pantalla bloqueada
 });
 document.addEventListener('keydown', e => { if (!isLocked()) return; if (/^\d$/.test(e.key)) lockKey(e.key); else if (e.key == 'Backspace') lockKey('del'); });
 bioAvailable().then(v => { BIO_OK = v; if (tab == 'set') render(); });

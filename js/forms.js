@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['forms.js'] = '8.0.0';
+(window.__V = window.__V || {})['forms.js'] = '8.0.1';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
 function mvTabs(c) { return `<div class="seg sm">${[['m', 'Ingreso / Egreso', 'openForm()'], ['t', 'Transferir', 'goTr()'], ['g', 'Metas', 'openContribForm()']].map(([k, l, fn]) => `<button type="button" class="${c == k ? 'on' : ''}" onclick="${fn}">${l}</button>`).join('')}</div>`; }

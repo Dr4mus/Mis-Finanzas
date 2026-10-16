@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '8.0.0';
+(window.__V = window.__V || {})['core.js'] = '8.0.1';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 

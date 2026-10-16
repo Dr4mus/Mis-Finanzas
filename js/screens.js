@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['screens.js'] = '8.0.0';
+(window.__V = window.__V || {})['screens.js'] = '8.0.1';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
