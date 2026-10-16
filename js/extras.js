@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['extras.js'] = '8.0.1';
+(window.__V = window.__V || {})['extras.js'] = '9.0.0';
 /* Mis finanzas — atajos, Inicio personalizable, bienvenida, papelera y recordatorio de respaldo. */
 
 // ============ atajos de movimientos frecuentes ============
@@ -12,7 +12,7 @@ function atajosCard() {
 ${list.length ? `<div class="chips sc">${list.map(s => `<button type="button" data-id="${esc(s.id)}" onclick="useShortcut(this.dataset.id)"><i class="icon-${esc(icoFor(s.c, s.t))}"></i>${scLabel(s)}</button>`).join('')}</div>
 <p class="mini" style="margin:6px 0 0">Un toque y queda anotado (con monto fijo) o se abre listo para poner el monto.</p>`
       : `<p class="mini" style="margin:0 0 6px">Crea botones para lo que anotas seguido: gasolina, colmado, almuerzo…</p>`}
-<button class="link" onclick="go('set');setTimeout(()=>{const e=$('sc-card');e&&e.scrollIntoView()},50)">${list.length ? 'Editar atajos' : '<i class="icon-plus"></i> Crear un atajo'}</button></div>`;
+<button class="link" onclick="setSub='atajos';go('set')">${list.length ? 'Editar atajos' : '<i class="icon-plus"></i> Crear un atajo'}</button></div>`;
 }
 async function useShortcut(id) {
   const s = shortcuts().find(x => x.id == id); if (!s) return;
@@ -147,8 +147,8 @@ function trashItems() {
 }
 function renderTrash(app) {
   const it = trashItems(), ago = t => { const d = Math.floor((Date.now() - t) / 864e5); return d == 0 ? 'hoy' : d == 1 ? 'ayer' : 'hace ' + d + ' días'; };
-  app.innerHTML = `${head('Papelera', true)}
-<p class="note" style="margin-bottom:12px">Aquí queda lo que borras (movimientos, cuentas, recurrentes, metas y ajustes) durante ${KEEP_DAYS} días. Si restauras algo, vuelve también en los demás teléfonos del hogar.</p>
+  app.innerHTML = `<button class="back" onclick="setSub='datos';go('set')"><i class="icon-chevron-left"></i> Respaldo y datos</button><div class="top"><h1>Papelera</h1><div class="tools">${syncBadge()}${eyeBtn()}</div></div>
+<p class="note" style="margin-bottom:12px">Aquí queda lo que borras (movimientos, cuentas, recurrentes, metas, deudas, bienes y ajustes) durante ${KEEP_DAYS} días. Si restauras algo, vuelve también en los demás teléfonos del hogar.</p>
 ${it.length ? `<div class="card">${it.map(x => `<div class="trow">${x.html}<div class="tact"><small class="mut">Borrado ${ago(x.del)}</small><button data-id="${esc(x.id)}" onclick="restoreItem(this.dataset.id)"><i class="icon-rotate-ccw"></i> Restaurar</button></div></div>`).join('')}</div>`
       : '<p class="empty">La papelera está vacía.</p>'}`;
 }

@@ -1,8 +1,8 @@
 'use strict';
-(window.__V = window.__V || {})['sync-ui.js'] = '8.0.1';
+(window.__V = window.__V || {})['sync-ui.js'] = '9.0.0';
 /* Mis finanzas — interfaz de la nube, aplicación de cambios remotos y arranque. */
-const APP_VERSION = '8.0.1';
-const KIND_KEY = { tx: 'txs', acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' };
+const APP_VERSION = '9.0.0';
+const KIND_KEY = { tx: 'txs', acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals', debt: 'debts', asset: 'assets' };
 const strip = o => JSON.parse(JSON.stringify(o)); // Firestore no acepta "undefined"
 
 // Todo lo sincronizable como elementos {id, k, u, del, d}
@@ -12,6 +12,7 @@ function getAllItems() {
   return [
     ...txs.map(x => it('tx', x)), ...trash.map(x => it('tx', x, x.del || 1)),
     ...accs.map(x => it('acc', x)), ...adjs.map(x => it('adj', x)), ...recs.map(x => it('rec', x)), ...goals.map(x => it('goal', x)),
+    ...debts.map(x => it('debt', x)), ...assets.map(x => it('asset', x)),
     ...bin.map(x => ({ id: x.id, k: x.k, u: x.del, del: x.del, d: strip(x.d) }))
   ];
 }
@@ -26,7 +27,7 @@ function applyRemote(list) {
       continue;
     }
     const key = KIND_KEY[data.k]; if (!key) continue;
-    const ru = data.u || 0, list0 = { txs, accs, adjs, recs, goals }[key];
+    const ru = data.u || 0, list0 = listOf(key);
     const cur = list0.find(x => x.id == id), inTrash = key == 'txs' && trash.find(x => x.id == id);
     if (data.del) {
       if ((dels[id] || 0) >= data.del && !cur) continue;
@@ -51,7 +52,8 @@ function applyRemote(list) {
   }
   if (changed) { purgeOld(); local(); render(); }
 }
-function assign(key, v) { if (key == 'txs') txs = v; else if (key == 'accs') accs = v; else if (key == 'adjs') adjs = v; else if (key == 'recs') recs = v; else goals = v; }
+function assign(key, v) { if (key == 'txs') txs = v; else if (key == 'accs') accs = v; else if (key == 'adjs') adjs = v; else if (key == 'recs') recs = v; else if (key == 'debts') debts = v; else if (key == 'assets') assets = v; else goals = v; }
+function listOf(key) { return { txs, accs, adjs, recs, goals, debts, assets }[key]; }
 
 // Ayudantes que usa cloud.js
 // Asegura que tu nombre esté en la lista de personas (tras unirte a un hogar)
@@ -62,8 +64,8 @@ function ensureMe() {
   else c.people.push(me);
   saveCfg(c);
 }
-function hasLocalData() { return txs.length + trash.length + accs.length + goals.length + recs.length + adjs.length > 0; }
-function resetLocalData() { setState({ cfg: fresh(), cfgT: 0, txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [] }); local(); render(); }
+function hasLocalData() { return txs.length + trash.length + accs.length + goals.length + recs.length + adjs.length + debts.length + assets.length > 0; }
+function resetLocalData() { setState({ cfg: fresh(), cfgT: 0, txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [], debts: [], assets: [] }); local(); render(); }
 function currentCfg() { return deep(cfg); }
 function mergeCloudCfg(localCfg, remoteHas) {
   if (!localCfg) return;
@@ -147,7 +149,7 @@ window.ask = ask;
 // Verifica que todos los archivos sean de la misma versión (evita la pantalla en blanco por archivos viejos)
 (function boot() {
   const want = (document.querySelector('meta[name=app-version]') || {}).content || APP_VERSION;
-  const bad = ['core.js', 'ui.js', 'screens.js', 'forms.js', 'plan.js', 'extras.js', 'lock.js', 'sync-ui.js'].filter(f => window.__V[f] != want)
+  const bad = ['core.js', 'ui.js', 'screens.js', 'forms.js', 'plan.js', 'extras.js', 'iconos.js', 'deudas.js', 'herramientas.js', 'lock.js', 'sync-ui.js'].filter(f => window.__V[f] != want)
     .map(f => window.__V[f] ? `js/${f} es de la versión ${window.__V[f]} (se esperaba ${want})` : `js/${f} no cargó o es de una versión anterior`);
   if (bad.length) { window.__showFail('Hay archivos de versiones distintas', bad.concat(window.__ERRS)); return; }
   try { if (shouldWelcome()) tab = 'welcome'; applyTheme(); render(); window.__booted = true; }

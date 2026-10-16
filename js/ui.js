@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['ui.js'] = '8.0.1';
+(window.__V = window.__V || {})['ui.js'] = '9.0.0';
 /* Mis finanzas — utilidades de interfaz, acciones (guardar/borrar) y navegación. */
 const dlg = document.getElementById('dlg');
 const $ = id => document.getElementById(id);
@@ -92,8 +92,8 @@ function saveGoal(g) {
   goals = goals.filter(x => x.id != id).concat(obj); local(); cloudPut('goal', obj); render();
 }
 function removeItem(kind, id) {
-  const key = { acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' }[kind];
-  const list = { accs, adjs, recs, goals }[key], it = list.find(x => x.id == id), ts = now();
+  const key = KIND_KEY[kind];
+  const list = listOf(key), it = list.find(x => x.id == id), ts = now();
   assign(key, list.filter(x => x.id != id));
   dels[id] = ts; if (it) { bin = bin.filter(x => x.id != id).concat({ k: kind, id, del: ts, d: deep(it) }); cloudDel(kind, it, ts); }
   local();
@@ -103,7 +103,7 @@ function restoreItem(id) {
   const t = trash.find(x => x.id == id);
   if (t) { restoreTx(id); toast('Restaurado', { kind: 'ok' }); return; }
   const b = bin.find(x => x.id == id); if (!b) return;
-  const key = { acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals' }[b.k], list = { accs, adjs, recs, goals }[key];
+  const key = KIND_KEY[b.k], list = listOf(key);
   const obj = (cleanState({ [key]: [{ ...b.d, id, u: now() }] })[key] || [])[0]; if (!obj) return fail('No se pudo restaurar.');
   assign(key, list.filter(x => x.id != id).concat(obj)); bin = bin.filter(x => x.id != id); delete dels[id];
   local(); cloudPut(b.k, obj); render(); toast('Restaurado', { kind: 'ok' });
@@ -113,13 +113,13 @@ async function resetAll() {
   if (!(await ask(shared ? 'Se borra TODO en la nube y en todos los teléfonos del hogar: cuentas, movimientos, metas, recurrentes y presupuesto.' : 'Se borra TODO en este teléfono: cuentas, movimientos, metas, recurrentes, presupuesto y categorías.', { title: '¿Borrar todos los datos?', ok: 'Sí, borrar', danger: true }))) return;
   if (!(await ask('No se puede deshacer, salvo importando un respaldo. ¿Ya descargaste uno?', { title: 'Última confirmación', ok: 'Borrar todo', danger: true }))) return;
   if (shared) window.Cloud.wipeAll(getAllItems());
-  setState({ cfg: fresh(), cfgT: now(), txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [] });
+  setState({ cfg: fresh(), cfgT: now(), txs: [], accs: [], adjs: [], recs: [], goals: [], dels: {}, trash: [], bin: [], debts: [], assets: [] });
   F = {}; local(); if (shared) cloudCfg(); go('home'); toast('Datos borrados');
 }
 
 // ============ navegación ============
 const NAV = ['home', 'hist', 'acc', 'bud', 'more'];
-const UNDER_MORE = ['more', 'rep', 'rec', 'goal', 'set', 'shared', 'plan', 'trash'];
+const UNDER_MORE = ['more', 'rep', 'rec', 'goal', 'set', 'shared', 'plan', 'trash', 'debts', 'tools'];
 function go(t) { tab = t; if (dlg.open) dlg.close(); render(); scrollTo(0, 0); }
 function pre(k) {
   const n = new Date(), y = n.getFullYear(), m = n.getMonth(), f = (mm, d) => new Date(Date.UTC(y, mm, d)).toISOString().slice(0, 10);
@@ -158,7 +158,7 @@ function render() {
   const app = $('app');
   try {
     document.documentElement.classList.toggle('wiz', tab == 'welcome');
-    ({ home: renderHome, hist: renderHist, acc: renderAcc, bud: renderBud, more: renderMore, rep: renderRep, rec: renderRec, goal: renderGoal, set: renderSet, shared: renderShared, plan: renderPlan, trash: renderTrash, welcome: renderWelcome }[tab] || renderHome)(app);
+    ({ home: renderHome, hist: renderHist, acc: renderAcc, bud: renderBud, more: renderMore, rep: renderRep, rec: renderRec, goal: renderGoal, set: renderSet, shared: renderShared, plan: renderPlan, trash: renderTrash, welcome: renderWelcome, debts: renderDebts, tools: renderTools }[tab] || renderHome)(app);
   } catch (e) {
     // Si una pantalla falla, se muestra el error en vez de dejar todo en blanco; el menú sigue funcionando
     console.error(e);

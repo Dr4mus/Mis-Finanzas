@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '8.0.1';
+(window.__V = window.__V || {})['core.js'] = '9.0.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -54,7 +54,7 @@ const monthEnd = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).t
 
 // ============ íconos y colores ============
 const ICONS = ['home', 'utensils-crossed', 'car', 'heart-pulse', 'graduation-cap', 'plug-zap', 'clapperboard', 'shirt', 'credit-card', 'piggy-bank', 'briefcase', 'trending-up', 'gift', 'shopping-cart', 'dumbbell', 'plane', 'dog', 'baby', 'wrench', 'phone', 'wifi', 'book-open', 'coffee', 'beer', 'music', 'film', 'gamepad-2', 'scissors', 'stethoscope', 'pill', 'fuel', 'bus', 'train', 'bike', 'sofa', 'lightbulb', 'droplet', 'shield', 'landmark', 'wallet', 'banknote', 'receipt', 'tag'];
-const acctIcon = type => ({ 'Efectivo': 'wallet', 'Cuenta de ahorro': 'piggy-bank', 'Cuenta corriente': 'landmark', 'Tarjeta de crédito': 'credit-card' }[type] || 'wallet');
+const acctIcon = type => ({ 'Efectivo': 'wallet', 'Cuenta de ahorro': 'piggy-bank', 'Cuenta corriente': 'landmark', 'Tarjeta de crédito': 'credit-card', 'Préstamo': 'hand-coins' }[type] || 'wallet');
 const ACCENTS = ['blue', 'pink', 'yellow', 'purple'];
 function accentFor(name) { let h = 0; for (const c of String(name || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return ACCENTS[h % 4]; }
 // Círculo de ícono con fondo tenue (antes usaba "var(--x)22", que es CSS inválido)
@@ -66,20 +66,21 @@ const DEF = {
     { n: 'Vivienda', t: 'e', icon: 'home' }, { n: 'Comida', t: 'e', icon: 'utensils-crossed' }, { n: 'Transporte', t: 'e', icon: 'car' },
     { n: 'Salud', t: 'e', icon: 'heart-pulse' }, { n: 'Educación', t: 'e', icon: 'graduation-cap' }, { n: 'Servicios', t: 'e', icon: 'plug-zap' },
     { n: 'Entretenimiento', t: 'e', icon: 'clapperboard' }, { n: 'Ropa', t: 'e', icon: 'shirt' }, { n: 'Deudas', t: 'e', icon: 'credit-card' },
-    { n: 'Ahorro', t: 'e', icon: 'piggy-bank' }, { n: 'Otros', t: 'e', icon: 'tag' },
+    { n: 'Ahorro', t: 'e', icon: 'piggy-bank' }, { n: 'Intereses', t: 'e', icon: 'percent' }, { n: 'Otros', t: 'e', icon: 'tag' },
     { n: 'Salario', t: 'i', icon: 'briefcase' }, { n: 'Negocio o freelance', t: 'i', icon: 'trending-up' }, { n: 'Inversiones', t: 'i', icon: 'landmark' },
     { n: 'Regalos', t: 'i', icon: 'gift' }, { n: 'Otros', t: 'i', icon: 'tag' }
   ],
   subs: { 'Entretenimiento': ['Netflix', 'Spotify', 'Cine', 'Salidas'] },
   people: ['Persona 1', 'Persona 2'], cur: ['USD', 'EUR'],
-  accTypes: ['Efectivo', 'Cuenta de ahorro', 'Cuenta corriente', 'Tarjeta de crédito'],
+  accTypes: ['Efectivo', 'Cuenta de ahorro', 'Cuenta corriente', 'Tarjeta de crédito', 'Préstamo'],
   budgetTotal: 0, budgetCats: {}, budgetOverrides: {}
 };
 const DEF0 = JSON.stringify(DEF), fresh = () => JSON.parse(DEF0);
 
 // ============ estado ============
 const LS = 'fin4';
-let cfg = fresh(), txs = [], accs = [], adjs = [], recs = [], goals = [], cfgT = 0, dels = {}, trash = [], bin = [];
+let cfg = fresh(), txs = [], accs = [], adjs = [], recs = [], goals = [], cfgT = 0, dels = {}, trash = [], bin = [], debts = [], assets = [];
+// debts: deudas con personas o instituciones fuera de las cuentas (yo debo / me deben) · assets: bienes (casa, vehículo…)
 // trash: movimientos borrados · bin: cuentas, recurrentes, metas y ajustes borrados ({k, id, del, d}). Se guardan 30 días.
 let F = {}, tab = 'home', ch = [], budYm = today().slice(0, 7), budMode = 'base';
 
@@ -88,14 +89,15 @@ const num = v => (Number.isFinite(+v) ? +v : 0);
 const okId = x => x && ID_RE.test(String(x.id || ''));
 const okDate = d => ISO_RE.test(String(d || ''));
 function cleanTx(x) {
-  if (!okId(x) || !okDate(x.d) || !['i', 'e', 'tr', 'g', 'st'].includes(x.t)) return null;
+  if (!okId(x) || !okDate(x.d) || !['i', 'e', 'tr', 'g', 'st', 'dm'].includes(x.t)) return null;
   const o = { ...x, a: num(x.a), v: num(x.v) };
   if (x.cu != null && !CUR_RE.test(x.cu)) o.cu = 'DOP';
   if (x.aTo != null) o.aTo = num(x.aTo);
   if (x.aa != null) o.aa = num(x.aa);
   if (x.r != null) o.r = num(x.r);
   if (x.split != null && !(x.split == 'half' || /^for:/.test(String(x.split)))) delete o.split;
-  for (const k of ['accId', 'accIdTo', 'goalId', 'home']) if (o[k] != null && !ID_RE.test(String(o[k]))) o[k] = null;
+  for (const k of ['accId', 'accIdTo', 'goalId', 'home', 'debtId']) if (o[k] != null && !ID_RE.test(String(o[k]))) o[k] = null;
+  if (x.tags != null) o.tags = (Array.isArray(x.tags) ? x.tags : []).map(String).filter(Boolean).slice(0, 10);
   return o;
 }
 function cleanState(o) {
@@ -112,12 +114,14 @@ function cleanState(o) {
     adjs: arr(o.adjs, x => (okId(x) && okDate(x.date) && ID_RE.test(String(x.accId)) ? { ...x, balance: num(x.balance), u: num(x.u || x.createdAt), createdAt: num(x.createdAt || x.u) } : null)),
     recs: arr(o.recs, x => (okId(x) && ID_RE.test(String(x.accId || 'x')) ? { ...x, amount: num(x.amount), currency: CUR_RE.test(x.currency) ? x.currency : 'DOP', done: Array.isArray(x.done) ? x.done.filter(okDate) : [], lastConfirmed: okDate(x.lastConfirmed) ? x.lastConfirmed : undefined, startDate: okDate(x.startDate) ? x.startDate : today() } : null)),
     goals: arr(o.goals, x => (okId(x) ? { ...x, target: num(x.target) } : null)),
-    bin: arr(o.bin, x => (x && ['acc', 'adj', 'rec', 'goal'].includes(x.k) && ID_RE.test(String(x.id || '')) && x.d && typeof x.d == 'object' ? { k: x.k, id: x.id, del: num(x.del), d: x.d } : null)),
+    debts: arr(o.debts, x => (okId(x) && (x.dir == 'owe' || x.dir == 'owed') ? { ...x, who: String(x.who || ''), amount: num(x.amount), cu: CUR_RE.test(x.cu || '') ? x.cu : 'DOP', date: okDate(x.date) ? x.date : today(), due: okDate(x.due) ? x.due : '', status: ['open', 'closed', 'forgiven'].includes(x.status) ? x.status : 'open' } : null)),
+    assets: arr(o.assets, x => (okId(x) ? { ...x, name: String(x.name || ''), value: num(x.value), cu: CUR_RE.test(x.cu || '') ? x.cu : 'DOP', hist: Array.isArray(x.hist) ? x.hist.filter(h => h && okDate(h.d)).map(h => ({ d: h.d, v: num(h.v) })) : [] } : null)),
+    bin: arr(o.bin, x => (x && ['acc', 'adj', 'rec', 'goal', 'debt', 'asset'].includes(x.k) && ID_RE.test(String(x.id || '')) && x.d && typeof x.d == 'object' ? { k: x.k, id: x.id, del: num(x.del), d: x.d } : null)),
     dels: Object.fromEntries(Object.entries(o.dels || {}).filter(([k, v]) => ID_RE.test(k)).map(([k, v]) => [k, num(v)]))
   };
 }
-function setState(s) { ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash } = s); bin = s.bin || []; purgeOld(); }
-const snapshot = () => ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash, bin });
+function setState(s) { ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash } = s); bin = s.bin || []; debts = s.debts || []; assets = s.assets || []; purgeOld(); }
+const snapshot = () => ({ cfg, cfgT, txs, accs, adjs, recs, goals, dels, trash, bin, debts, assets });
 // La papelera guarda lo borrado 30 días
 const KEEP_DAYS = 30;
 function purgeOld() { const lim = Date.now() - KEEP_DAYS * 864e5; trash = trash.filter(x => (x.del || 0) > lim); bin = bin.filter(x => (x.del || 0) > lim); }
@@ -151,6 +155,9 @@ const refRate = cu => +((cfg.rates || {})[cu]) || 0;
 
 // ============ saldos ============
 const isCard = a => a && a.type == 'Tarjeta de crédito';
+const isLoan = a => a && a.type == 'Préstamo';
+// Cuentas que representan una deuda (tarjetas y préstamos): su saldo negativo es lo que debes
+const isDebtAcc = a => isCard(a) || isLoan(a);
 const goalHome = x => { const g = goals.find(q => q.id == x.goalId); return g ? (g.accId || null) : (x.home || null); };
 
 // Monto de un ingreso/egreso expresado en la moneda de la cuenta.
@@ -181,6 +188,8 @@ function acctBalance(acc, asOf) {
     } else if (x.t == 'g') {
       const h = goalHome(x);
       if (x.accId != h) { if (x.accId == acc.id) bal -= x.a; if (h == acc.id) bal += x.v; }
+    } else if (x.t == 'dm') {
+      if (x.accId == acc.id) bal += x.a; // préstamo dado/recibido o su pago: entra (+) o sale (−) de la cuenta
     } else if (x.accId == acc.id) {
       const am = amtInAcc(x, acc);
       bal += x.t == 'i' ? am : -am;
@@ -195,7 +204,7 @@ function totalsByCurrency(asOf) {
   for (const a of accs) {
     const c = a.currency || 'DOP', b = acctBalance(a, asOf);
     const t = out[c] = out[c] || { disp: 0, deuda: 0, neto: 0 };
-    if (isCard(a)) t.deuda += Math.max(0, -b); else t.disp += b;
+    if (isDebtAcc(a)) t.deuda += Math.max(0, -b); else t.disp += b;
     t.neto += b;
   }
   for (const t of Object.values(out)) { t.disp = round2(t.disp); t.deuda = round2(t.deuda); t.neto = round2(t.neto); }
@@ -206,8 +215,69 @@ const totalDeudaDOP = asOf => (totalsByCurrency(asOf).DOP || {}).deuda || 0;
 // Patrimonio aproximado en DOP usando la última tasa conocida de cada moneda.
 function netWorthApprox(asOf) {
   const t = totalsByCurrency(asOf); let s = 0, missing = [];
-  for (const [c, v] of Object.entries(t)) { const r = c == 'DOP' ? 1 : (refRate(c) || rateOf(c, asOf || today())); if (r) s += v.neto * r; else missing.push(c); }
+  const toDOP = (v, c) => { if (c == 'DOP') return v; const r = refRate(c) || rateOf(c, asOf || today()); if (!r) { if (!missing.includes(c)) missing.push(c); return 0; } return v * r; };
+  for (const [c, v] of Object.entries(t)) s += toDOP(v.neto, c);
+  const p = extraWorth(asOf);
+  s += p.bienes.reduce((q, x) => q + toDOP(x.v, x.cu), 0) + p.meDeben.reduce((q, x) => q + toDOP(x.v, x.cu), 0) - p.debo.reduce((q, x) => q + toDOP(x.v, x.cu), 0);
   return { total: round2(s), missing };
+}
+// ============ deudas con personas y bienes ============
+// Lo pagado de una deuda con una persona (abonos) hasta una fecha
+const debtPaid = (d, asOf) => round2(txs.filter(x => x.t == 'dm' && x.debtId == d.id && x.kind == 'pay' && (!asOf || x.d <= asOf)).reduce((q, x) => q + Math.abs(x.v), 0));
+// Lo que falta: 0 si se saldó o se perdonó
+function debtLeft(d, asOf) {
+  if (asOf && d.date > asOf) return 0;
+  if (d.status != 'open' && (!asOf || !d.closedAt || d.closedAt <= asOf)) return 0;
+  return Math.max(0, round2(d.amount - debtPaid(d, asOf)));
+}
+// Valor de un bien en una fecha (según su historial de valores)
+function assetValue(a, asOf) {
+  if (!asOf) return a.value;
+  const h = (a.hist || []).filter(x => x.d <= asOf).sort((x, y) => x.d.localeCompare(y.d));
+  return h.length ? h[h.length - 1].v : 0;
+}
+// Bienes, lo que te deben y lo que debes a personas (fuera de las cuentas)
+function extraWorth(asOf) {
+  return {
+    bienes: assets.map(a => ({ v: assetValue(a, asOf), cu: a.cu || 'DOP' })),
+    meDeben: debts.filter(d => d.dir == 'owed').map(d => ({ v: debtLeft(d, asOf), cu: d.cu || 'DOP' })),
+    debo: debts.filter(d => d.dir == 'owe').map(d => ({ v: debtLeft(d, asOf), cu: d.cu || 'DOP' }))
+  };
+}
+// ============ préstamos (hipoteca, vehículo, personal…) ============
+const pmt = (P, rate, n) => { const i = rate / 1200; if (!(n > 0)) return 0; return round2(i ? P * i / (1 - Math.pow(1 + i, -n)) : P / n); };
+// Tabla de pagos desde un saldo: cada cuota separa interés y capital. extra = abono adicional cada mes.
+function amortize(balance, rate, payment, firstDue, extra = 0, max = 600) {
+  const i = rate / 1200, rows = []; let b = round2(balance), d = firstDue, tot = 0;
+  if (!(payment + extra > b * i + 0.004) && b > 0) return { rows, months: Infinity, interest: Infinity, never: true };
+  for (let n = 1; b > 0.004 && n <= max; n++) {
+    const it = round2(b * i), pay = Math.min(round2(payment + extra), round2(b + it)), cap = round2(pay - it);
+    b = round2(b - cap); tot += it; rows.push({ n, d, pay, it, cap, b: Math.max(0, b) });
+    d = d ? addMonthsISO(d, 1) : d;
+  }
+  return { rows, months: rows.length, interest: round2(tot), end: rows.length ? rows[rows.length - 1].d : firstDue };
+}
+// Suma meses a una fecha conservando el día (31 → último día del mes)
+function addMonthsISO(iso, k) { const y = +iso.slice(0, 4), m = +iso.slice(5, 7) - 1 + k, day = +iso.slice(8, 10), Y = y + Math.floor(m / 12), M = ((m % 12) + 12) % 12; return new Date(Date.UTC(Y, M, clampDay(Y, M, day))).toISOString().slice(0, 10); }
+const loanOwed = a => Math.max(0, -acctBalance(a));
+// Pagos (transferencias) que entraron a un préstamo en un rango
+const loanPaidIn = (a, from, to) => txs.filter(x => x.t == 'tr' && x.accIdTo == a.id && x.d > from && x.d <= to).reduce((q, x) => q + x.aTo, 0);
+// Cuántos pagos distintos (cuota o abono) hubo en un rango
+const loanPaysIn = (a, from, to) => new Set(txs.filter(x => x.t == 'tr' && x.accIdTo == a.id && x.d > from && x.d <= to && x.aTo > 0).map(x => x.grp || x.id)).size;
+// Ciclo de un préstamo: próxima cuota, si ya se pagó y si quedó alguna atrasada
+function loanCycle(a) {
+  if (!isLoan(a) || !(a.payDay >= 1)) return null;
+  const td = today(), owed = loanOwed(a); if (owed <= 0.004) return { done: true, owed: 0 };
+  let due = nextDayAfter(+a.payDay, addDays(td, -1));
+  if (a.firstPay && a.firstPay > due) due = a.firstPay; // la primera cuota todavía no llega
+  const prev = lastDayOn(+a.payDay, addDays(due, -1)), prev2 = lastDayOn(+a.payDay, addDays(prev, -1));
+  const start = maxISO(a.firstPay || '0000-01-01', a.openDate || '0000-01-01'); // antes de usar la app o de la primera cuota no hay atrasos
+  // Si la cuota anterior no se pagó a tiempo, el primer pago después de ella cuenta para esa (pago tarde), no para la de ahora.
+  const prevOk = prev < start || loanPaidIn(a, prev2, prev) > 0.004, nNow = loanPaysIn(a, prev, td);
+  const paid = prevOk ? nNow > 0 : nNow > 1;
+  const missed = !prevOk && nNow == 0;
+  const payment = +a.payment || pmt(owed, +a.rate || 0, +a.term || 12);
+  return { due: missed ? prev : due, paid, missed, payment: Math.min(payment, round2(owed + owed * (+a.rate || 0) / 1200)), owed, days: daysBetween(td, missed ? prev : due) };
 }
 
 // ============ metas ============
@@ -236,11 +306,27 @@ function without(id, fn) { const keep = txs; txs = txs.filter(t => t.id != id); 
 
 // ============ presupuesto ============
 // Base (todos los meses) + excepciones por mes. Un límite borrado se elimina de verdad (antes volvía al recargar).
-function budgetFor(ym) {
+function budgetBase(ym) {
   const o = (cfg.budgetOverrides || {})[ym] || {};
   const cats = { ...(cfg.budgetCats || {}) };
   for (const [k, v] of Object.entries(o.cats || {})) if (v == null) delete cats[k]; else cats[k] = v;
   return { total: o.total != null ? o.total : (cfg.budgetTotal || 0), cats, hasTotalOverride: o.total != null, catOverrides: o.cats || {} };
+}
+// Presupuesto que se arrastra: lo que sobró (o lo que te pasaste) en meses anteriores se suma al tope de este mes.
+// cfg.rollCats = { categoría: 'YYYY-MM' desde cuándo se arrastra }
+function budgetCarry(cat, ym) {
+  const from = (cfg.rollCats || {})[cat]; if (!from || from >= ym) return 0;
+  let carry = 0, m = maxISO(from, addMonths(ym, -24));
+  for (; m < ym; m = addMonths(m, 1)) {
+    const lim = budgetBase(m).cats[cat] || 0, spent = txs.filter(x => x.t == 'e' && x.c == cat && x.d.slice(0, 7) == m).reduce((q, x) => q + x.v, 0);
+    carry = round2(carry + lim - spent);
+  }
+  return carry;
+}
+function budgetFor(ym) {
+  const b = budgetBase(ym); b.carry = {};
+  for (const c of Object.keys(cfg.rollCats || {})) { if (b.cats[c] == null) continue; const k = budgetCarry(c, ym); if (k) { b.carry[c] = k; b.cats[c] = Math.max(0, round2(b.cats[c] + k)); } }
+  return b;
 }
 function budgetStatus(spent, limit) { if (!limit) return null; const p = spent / limit; return { pct: Math.round(p * 100), level: p >= 1 ? 'out' : p >= 0.8 ? 'yellow' : 'in' }; }
 const barCol = level => (level == 'out' ? 'var(--out)' : level == 'yellow' ? 'var(--yellow)' : 'var(--in)');
@@ -341,7 +427,7 @@ const pctChange = (a, b) => (b ? Math.round((a - b) / Math.abs(b) * 100) : null)
 const norm = s => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 function txText(x) {
   const a = accs.find(c => c.id == x.accId), b = accs.find(c => c.id == x.accIdTo), g = goals.find(q => q.id == x.goalId);
-  return norm([x.c, x.sub, x.n, x.w, x.byName, a && a.name, b && b.name, g && g.name, x.t == 'tr' ? 'transferencia' : '', x.t == 'st' ? 'saldo pareja' : '', x.to, x.split ? 'compartido' : '', x.a, x.v].join(' '));
+  return norm([x.c, x.sub, x.n, x.w, x.byName, a && a.name, b && b.name, g && g.name, ...(x.tags || []).map(t => '#' + t), x.t == 'dm' ? ((debts.find(q => q.id == x.debtId) || {}).who || '') + ' deuda prestamo' : '', x.t == 'tr' ? 'transferencia' : '', x.t == 'st' ? 'saldo pareja' : '', x.to, x.split ? 'compartido' : '', x.a, x.v].join(' '));
 }
 
 // ============ gastos compartidos ============
@@ -379,7 +465,7 @@ function convert(amount, from, to, d) {
 }
 const recCur = r => r.currency || 'DOP';
 const recDOP = (r, d) => convert(r.amount, recCur(r), 'DOP', d);
-const liquidAccs = () => accs.filter(a => !isCard(a) && (a.currency || 'DOP') == 'DOP');
+const liquidAccs = () => accs.filter(a => !isDebtAcc(a) && (a.currency || 'DOP') == 'DOP');
 const isLiquid = id => liquidAccs().some(a => a.id == id);
 // Fechas de un recurrente que aún no se han confirmado ni omitido, hasta "to" (incluye las vencidas)
 const recOpen = (r, to) => r.active === false ? [] : nextDates(r, recFrom(r), to).filter(d => !(r.done || []).includes(d));
@@ -410,6 +496,9 @@ function safeToSpend() {
     const cy = cardCycle(a); if (!cy || cy.left <= 0 || cy.pay >= until || paidByRec(a)) return;
     items.push({ name: 'Pagar ' + a.name, d: cy.pay, v: convert(cy.left, a.currency, 'DOP', td), late: cy.pay < td, icon: 'credit-card', card: a.id });
   });
+  // cuotas de préstamos y deudas con personas que vencen antes
+  if (typeof loanDues == 'function') loanDues('0000-01-01', addDays(until, -1)).forEach(l => { if (!paidByRec(l.acc)) items.push({ name: 'Cuota ' + l.acc.name, d: l.d, v: convert(l.pay, l.acc.currency, 'DOP', td), late: l.late, icon: 'hand-coins', loan: l.acc.id }); });
+  debts.filter(d => d.dir == 'owe' && d.status == 'open' && d.due && d.due < until).forEach(d => items.push({ name: 'Pagarle a ' + d.who, d: d.due, v: convert(debtLeft(d), d.cu, 'DOP', td), late: d.due < td, icon: 'user' }));
   items.sort((x, y) => x.d.localeCompare(y.d));
   const committed = round2(items.reduce((s, x) => s + x.v, 0)), left = round2(free - committed), days = Math.max(1, daysBetween(td, until));
   return { until, income: ni, free, items, committed, left, days, perDay: left > 0 ? round2(left / days) : 0 };
@@ -434,11 +523,16 @@ function projection(days, daily = 0) {
     ev.push({ d, id: a.id, v: cy.left, name: 'Pago ' + a.name }); // la deuda baja…
     ev.push({ d, id: null, v: -convert(cy.left, a.currency, 'DOP', td), name: 'Pago ' + a.name }); // …y sale de tus cuentas (sin cuenta fija)
   });
+  if (typeof loanDues == 'function') loanDues('0000-01-01', end).forEach(l => {
+    if (paidByRec(l.acc)) return; const d = l.d < td ? td : l.d;
+    ev.push({ d, id: l.acc.id, v: l.cap, name: 'Cuota ' + l.acc.name }); ev.push({ d, id: null, v: -convert(l.pay, l.acc.currency, 'DOP', td), name: 'Cuota ' + l.acc.name });
+  });
+  debts.filter(x => x.dir == 'owe' && x.status == 'open' && x.due && x.due <= end).forEach(x => ev.push({ d: x.due < td ? td : x.due, id: null, v: -convert(debtLeft(x), x.cu, 'DOP', td), name: 'Pagarle a ' + x.who }));
   ev.sort((x, y) => x.d.localeCompare(y.d));
   const bal = Object.fromEntries(accs.map(a => [a.id, acctBalance(a)])), liq = new Set(liquidAccs().map(a => a.id));
   let total = round2([...liq].reduce((s, id) => s + bal[id], 0));
   const series = [], neg = {}; let i = 0, min = { d: td, v: total };
-  accs.forEach(a => { if (!isCard(a) && bal[a.id] < -0.005) neg[a.id] = { acc: a, d: td, v: bal[a.id], now: true }; }); // ya está en negativo hoy
+  accs.forEach(a => { if (!isDebtAcc(a) && bal[a.id] < -0.005) neg[a.id] = { acc: a, d: td, v: bal[a.id], now: true }; }); // ya está en negativo hoy
   for (let k = 0; k <= days; k++) {
     const d = addDays(td, k);
     while (i < ev.length && ev[i].d <= d) {
@@ -446,7 +540,7 @@ function projection(days, daily = 0) {
       if (e.id == null) total += e.v;
       else { bal[e.id] = round2((bal[e.id] || 0) + e.v); if (liq.has(e.id)) total += e.v; }
       const a = e.id && accs.find(x => x.id == e.id);
-      if (a && !isCard(a) && bal[a.id] < -0.005) { if (!neg[a.id]) neg[a.id] = { acc: a, d, v: bal[a.id] }; else neg[a.id].v = Math.min(neg[a.id].v, bal[a.id]); }
+      if (a && !isDebtAcc(a) && bal[a.id] < -0.005) { if (!neg[a.id]) neg[a.id] = { acc: a, d, v: bal[a.id] }; else neg[a.id].v = Math.min(neg[a.id].v, bal[a.id]); }
     }
     if (k > 0 && daily) total -= daily; // gasto del día a día estimado
     total = round2(total); series.push({ d, v: total });
@@ -493,6 +587,16 @@ function calendarEvents(ym) {
     if (a.payDay) { const d = daysOnMonth(a.payDay, ym); out.push({ d, k: 'pay', name: 'Pagar ' + a.name, v: cy && cy.pay == d ? cy.left : null, cu: a.currency, st: cy && cy.pay == d ? (cy.left <= 0 ? 'done' : d < td ? 'late' : 'next') : d < td ? 'done' : 'next', acc: a.id, icon: 'credit-card' }); }
     if (a.cutDay) { const d = daysOnMonth(a.cutDay, ym); out.push({ d, k: 'cut', name: 'Corte ' + a.name, st: d < td ? 'done' : 'next', icon: 'credit-card' }); }
   });
+  // cuotas de préstamos
+  accs.filter(a => isLoan(a) && a.payDay >= 1).forEach(a => {
+    const d = daysOnMonth(a.payDay, ym); if (d < maxISO(a.firstPay || '', a.openDate || '')) return;
+    const cy = loanCycle(a); if (!cy || (cy.done && d >= td)) return;
+    // la primera cuota sin pagar: las de antes ya se cubrieron (o son de antes de usar la app)
+    const next = cy.done ? '9999-12-31' : cy.missed ? cy.due : cy.paid ? addMonthsISO(cy.due, 1) : cy.due;
+    out.push({ d, k: 'loan', name: 'Cuota ' + a.name, v: +a.payment || null, cu: a.currency, st: d < next ? 'done' : d < td ? 'late' : 'next', loan: a.id, icon: 'hand-coins' });
+  });
+  // fechas límite de deudas con personas
+  debts.filter(x => x.due && x.due.slice(0, 7) == ym).forEach(x => out.push({ d: x.due, k: 'debt', name: (x.dir == 'owe' ? 'Pagarle a ' : 'Cobrarle a ') + x.who, v: debtLeft(x), cu: x.cu, st: x.status != 'open' ? 'done' : x.due < td ? 'late' : 'next', debt: x.id, dir: x.dir, icon: 'user' }));
   return out.sort((x, y) => x.d.localeCompare(y.d) || x.name.localeCompare(y.name));
 }
 
