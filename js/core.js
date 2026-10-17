@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '9.0.0';
+(window.__V = window.__V || {})['core.js'] = '10.0.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -127,7 +127,12 @@ const KEEP_DAYS = 30;
 function purgeOld() { const lim = Date.now() - KEEP_DAYS * 864e5; trash = trash.filter(x => (x.del || 0) > lim); bin = bin.filter(x => (x.del || 0) > lim); }
 
 // ---- almacenamiento local (solo guarda; la nube se actualiza aparte en cada acción) ----
-function local() { try { localStorage.setItem(LS, JSON.stringify(snapshot())); } catch (e) { console.warn('No se pudo guardar localmente', e); } }
+// Guarda en este teléfono. Varios cambios seguidos (por ejemplo, pagar una cuota = 2 movimientos) se juntan en una sola escritura
+// al terminar la acción; si la app se cierra o pasa al fondo, se escribe en el acto.
+let _lsDirty = false;
+function localNow() { if (!_lsDirty) return; _lsDirty = false; try { localStorage.setItem(LS, JSON.stringify(snapshot())); } catch (e) { console.warn('No se pudo guardar localmente', e); } }
+function local() { if (_lsDirty) return; _lsDirty = true; queueMicrotask(localNow); }
+addEventListener('pagehide', localNow); document.addEventListener('visibilitychange', () => { if (document.hidden) localNow(); });
 try { const o = JSON.parse(localStorage.getItem(LS)); if (o) setState(cleanState(o)); } catch (e) { }
 try { navigator.storage && navigator.storage.persist && navigator.storage.persist(); } catch (e) { }
 
@@ -171,31 +176,58 @@ function amtInAcc(x, acc) {
   return r ? round2(x.v / r) : x.a;
 }
 
+// Efecto de un movimiento en el saldo de una cuenta (0 si no la toca)
+function txEffect(x, acc) {
+  if (x.t == 'tr') return (x.accId == acc.id ? -x.a : 0) + (x.accIdTo == acc.id ? x.aTo : 0);
+  if (x.t == 'g') { const h = goalHome(x); if (x.accId == h) return 0; return (x.accId == acc.id ? -x.a : 0) + (h == acc.id ? x.v : 0); }
+  if (x.t == 'dm') return x.accId == acc.id ? x.a : 0; // préstamo dado/recibido o su pago: entra (+) o sale (−) de la cuenta
+  if (x.accId != acc.id) return 0;
+  const am = amtInAcc(x, acc); return x.t == 'i' ? am : -am;
+}
+// Rendimiento: índice por cuenta (movimientos que la tocan, ordenados por fecha) y memoria de saldos.
+// Se descarta solo cuando cambian txs, adjs, goals o cfg (siempre se reemplazan, nunca se modifican en el lugar).
+let _bx = {};
+function balIndex(acc) {
+  dataFresh();
+  if (!_bx.all) { // una sola pasada por los movimientos arma el índice de todas las cuentas
+    const by = new Map(accs.map(a => [a.id, []])), am = new Map(accs.map(a => [a.id, a]));
+    for (const x of txs) {
+      const ids = x.t == 'g' ? [x.accId, goalHome(x)] : x.t == 'tr' ? [x.accId, x.accIdTo] : [x.accId];
+      for (let k = 0; k < ids.length; k++) {
+        const id = ids[k]; if (!id || (k && id == ids[0])) continue;
+        const L = by.get(id); if (!L) continue;
+        const v = txEffect(x, am.get(id)); if (v) L.push({ d: x.d, cr: x.cr || 0, v });
+      }
+    }
+    for (const [id, L] of by) { L.sort((p, q) => (p.d < q.d ? -1 : p.d > q.d ? 1 : 0)); _bx.idx.set(id + '|' + am.get(id).currency, L); }
+    _bx.all = true;
+  }
+  const key = acc.id + '|' + acc.currency; let E = _bx.idx.get(key);
+  if (!E) { // cuenta que no está en la lista (por ejemplo, una copia editada): se calcula aparte
+    E = []; for (const x of txs) { const v = txEffect(x, acc); if (v) E.push({ d: x.d, cr: x.cr || 0, v }); }
+    E.sort((p, q) => (p.d < q.d ? -1 : p.d > q.d ? 1 : 0)); _bx.idx.set(key, E);
+  }
+  return E;
+}
+// Memoria para cálculos que solo dependen de los datos (se borra sola cuando cambian)
+function dataFresh() { if (_bx.t !== txs || _bx.a !== adjs || _bx.g !== goals || _bx.c !== cfg || _bx.ac !== accs || _bx.r !== recs || _bx.d !== debts) _bx = { t: txs, a: adjs, g: goals, c: cfg, ac: accs, r: recs, d: debts, idx: new Map(), memo: new Map() }; }
+function memo(k, f) { dataFresh(); if (_bx.memo.has(k)) return _bx.memo.get(k); const v = f(); _bx.memo.set(k, v); return v; }
 function acctBalance(acc, asOf) {
   asOf = asOf || '9999-12-31';
   if (acc.openDate && asOf < acc.openDate) return 0;
-  const myAdjs = adjs.filter(a => a.accId == acc.id && a.date <= asOf).sort((a, b) => b.date.localeCompare(a.date) || b.createdAt - a.createdAt);
+  const E = balIndex(acc), mk = acc.id + '|' + asOf + '|' + acc.openBalance + '|' + acc.openDate + '|' + acc.currency, hit = _bx.memo.get(mk);
+  if (hit !== undefined) return hit;
   let base = acc.openBalance || 0, from = acc.openDate || '0000-01-01', adj = null;
-  if (myAdjs.length) { adj = myAdjs[0]; base = adj.balance; from = adj.date; }
+  for (const a of adjs) if (a.accId == acc.id && a.date <= asOf && (!adj || a.date > adj.date || (a.date == adj.date && a.createdAt > adj.createdAt))) adj = a;
+  if (adj) { base = adj.balance; from = adj.date; }
+  let lo = 0, hi = E.length; while (lo < hi) { const m = (lo + hi) >> 1; if (E[m].d < from) lo = m + 1; else hi = m; }
   let bal = base;
-  for (const x of txs) {
-    if (x.d > asOf || x.d < from) continue;
+  for (let i = lo; i < E.length && E[i].d <= asOf; i++) {
     // el ajuste ya incluye lo anotado antes de él ese mismo día; lo anotado después sí cuenta
-    if (adj && x.d == from && (x.cr || 0) < (adj.createdAt || 0)) continue;
-    if (x.t == 'tr') {
-      if (x.accId == acc.id) bal -= x.a;
-      if (x.accIdTo == acc.id) bal += x.aTo;
-    } else if (x.t == 'g') {
-      const h = goalHome(x);
-      if (x.accId != h) { if (x.accId == acc.id) bal -= x.a; if (h == acc.id) bal += x.v; }
-    } else if (x.t == 'dm') {
-      if (x.accId == acc.id) bal += x.a; // préstamo dado/recibido o su pago: entra (+) o sale (−) de la cuenta
-    } else if (x.accId == acc.id) {
-      const am = amtInAcc(x, acc);
-      bal += x.t == 'i' ? am : -am;
-    }
+    if (adj && E[i].d == from && E[i].cr < (adj.createdAt || 0)) continue;
+    bal += E[i].v;
   }
-  return round2(bal);
+  const r = round2(bal); _bx.memo.set(mk, r); return r;
 }
 
 // Totales separados por moneda (antes se sumaban tarjetas en USD como si fueran pesos).
@@ -389,7 +421,7 @@ const inF = x => (!F.f || x.d >= F.f) && (!F.u || x.d <= F.u);
 // Ingresos y egresos (para gráficas y Excel)
 const fl = () => txs.filter(x => (x.t == 'i' || x.t == 'e') && inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc)).sort((a, b) => b.d.localeCompare(a.d));
 // Historial: incluye transferencias y movimientos de metas (antes solo aparecían cuando estaban borrados)
-const histMatch = x => (!F.q || txText(x).includes(norm(F.q))) && inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc || x.accIdTo == F.acc);
+const histMatch = x => (!F.rev || x.rev) && (!F.q || txText(x).includes(norm(F.q))) && inF(x) && (!F.t || x.t == F.t) && (!F.c || x.c == F.c) && (!F.w || x.w == F.w) && (!F.acc || x.accId == F.acc || x.accIdTo == F.acc);
 const sum = (a, t) => a.filter(x => x.t == t).reduce((s, x) => s + x.v, 0);
 const grp = (a, k) => a.reduce((o, x) => (o[x[k]] = (o[x[k]] || 0) + x.v, o), {});
 const icoFor = (catName, type) => (cfg.cats.find(x => x.n == catName && x.t == type) || {}).icon || 'tag';
@@ -407,6 +439,9 @@ function nextDayAfter(day, iso) { // primera fecha > iso que cae en ese día del
 // Saldo al corte, lo pagado desde entonces y cuánto falta antes de la fecha de pago
 function cardCycle(a) {
   if (!isCard(a) || !(a.cutDay >= 1) || !(a.payDay >= 1)) return null;
+  return memo('cc|' + a.id + '|' + a.cutDay + '|' + a.payDay + '|' + a.openBalance + '|' + a.openDate + '|' + a.currency + '|' + today(), () => cardCycle0(a));
+}
+function cardCycle0(a) {
   const td = today(), cut = lastDayOn(+a.cutDay, td), pay = nextDayAfter(+a.payDay, cut);
   const debtAtCut = Math.max(0, -acctBalance(a, cut));
   const paid = txs.filter(x => x.d > cut && x.d <= td && ((x.t == 'tr' && x.accIdTo == a.id) || (x.t == 'i' && x.accId == a.id)))
@@ -415,8 +450,19 @@ function cardCycle(a) {
   return { cut, pay, nextCut: nextDayAfter(+a.cutDay, td), debtAtCut: round2(debtAtCut), paid: round2(paid), left, days: daysBetween(td, pay) };
 }
 
+// Los n movimientos más recientes sin ordenar toda la lista (rápido con miles de movimientos)
+function latestTxs(n, ok = () => true) {
+  const newer = (p, q) => p.d > q.d || (p.d == q.d && (p.cr || 0) > (q.cr || 0)), top = [];
+  for (const x of txs) {
+    if (!ok(x) || (top.length == n && !newer(x, top[n - 1]))) continue;
+    let i = top.length; while (i > 0 && newer(x, top[i - 1])) i--;
+    top.splice(i, 0, x); if (top.length > n) top.pop();
+  }
+  return top;
+}
 // ============ reportes ============
-function monthStats(ym) {
+function monthStats(ym) { return memo('ms|' + ym, () => monthStats0(ym)); } // memoria: se recalcula solo si cambian los datos
+function monthStats0(ym) {
   const m = txs.filter(x => x.d.slice(0, 7) == ym);
   const inc = sum(m, 'i'), exp = sum(m, 'e'), net = inc - exp;
   return { inc: round2(inc), exp: round2(exp), net: round2(net), rate: inc > 0 ? Math.round(net / inc * 100) : null };
@@ -555,24 +601,30 @@ function dailyVariable() {
   return round2(txs.filter(x => x.t == 'e' && !x.rec && x.d >= from && x.d <= td).reduce((s, x) => s + x.v, 0) / days);
 }
 // Promedio por categoría de los 3 meses anteriores (solo desde que empezaste a anotar)
-function catCompare(ym, n = 3) {
+function catCompare(ym, n = 3) { return memo('cc|' + ym + '|' + n + '|' + today(), () => catCompare0(ym, n)); } // memoria: se recalcula solo si cambian los datos
+function catCompare0(ym, n) {
   const first = txs.reduce((m, x) => (x.t == 'e' && (!m || x.d < m) ? x.d : m), null); if (!first) return null;
   const months = []; for (let k = 1; k <= n; k++) { const m = addMonths(ym, -k); if (m >= first.slice(0, 7)) months.push(m); }
   if (!months.length) return null;
   const tot = {}; txs.filter(x => x.t == 'e' && months.includes(x.d.slice(0, 7))).forEach(x => tot[x.c] = (tot[x.c] || 0) + x.v);
   const cur = grp(txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), 'c');
-  const isCur = ym == today().slice(0, 7), frac = isCur ? +today().slice(8, 10) / +monthEnd(ym).slice(8, 10) : 1;
+  const isCur = ym == today().slice(0, 7), day = isCur ? +today().slice(8, 10) : 31, frac = isCur ? day / +monthEnd(ym).slice(8, 10) : 1;
+  // Lo que sueles llevar gastado a esta altura del mes (según tus meses anteriores, no una línea recta):
+  // si la renta o la luz se pagan a principio de mes, no parece que "vas rápido" el día 5.
+  const toDate = {}; txs.filter(x => x.t == 'e' && months.includes(x.d.slice(0, 7)) && +x.d.slice(8, 10) <= day).forEach(x => toDate[x.c] = (toDate[x.c] || 0) + x.v);
   const rows = [...new Set([...Object.keys(tot), ...Object.keys(cur)])].map(c => {
-    const avg = round2((tot[c] || 0) / months.length), v = round2(cur[c] || 0);
-    return { c, v, avg, pct: avg ? Math.round((v - avg) / avg * 100) : null, pace: avg ? v / (avg * frac) : null };
+    const avg = round2((tot[c] || 0) / months.length), v = round2(cur[c] || 0), td = round2((toDate[c] || 0) / months.length);
+    const exp = isCur ? (td > 0 ? td : round2(avg * frac)) : avg;
+    return { c, v, avg, exp, pct: avg ? Math.round((v - avg) / avg * 100) : null, pace: exp ? v / exp : null };
   }).sort((a, b) => b.v - a.v || b.avg - a.avg);
-  const avgTot = round2(rows.reduce((s, r) => s + r.avg, 0)), vTot = round2(rows.reduce((s, r) => s + r.v, 0));
-  return { months: months.length, frac, rows, avgTot, vTot };
+  const avgTot = round2(rows.reduce((s, r) => s + r.avg, 0)), vTot = round2(rows.reduce((s, r) => s + r.v, 0)), expTot = round2(rows.reduce((s, r) => s + r.exp, 0));
+  return { months: months.length, frac, rows, avgTot, vTot, expTot };
 }
 // Fechas de un mes que caen en cierto día (para cortes y pagos de tarjetas y facturas)
 function daysOnMonth(day, ym) { const y = +ym.slice(0, 4), m = +ym.slice(5, 7) - 1; return new Date(Date.UTC(y, m, clampDay(y, m, +day))).toISOString().slice(0, 10); }
 // Eventos de un mes para el calendario de pagos
-function calendarEvents(ym) {
+function calendarEvents(ym) { return memo('ce|' + ym + '|' + today(), () => calendarEvents0(ym)); } // memoria: se recalcula solo si cambian los datos
+function calendarEvents0(ym) {
   const from = ym + '-01', to = monthEnd(ym), td = today(), out = [];
   recs.filter(r => r.active !== false).forEach(r => {
     const rf = recFrom(r), done = r.done || [];

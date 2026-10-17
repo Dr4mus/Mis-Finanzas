@@ -1,7 +1,7 @@
 'use strict';
-(window.__V = window.__V || {})['sync-ui.js'] = '9.0.0';
+(window.__V = window.__V || {})['sync-ui.js'] = '10.0.0';
 /* Mis finanzas — interfaz de la nube, aplicación de cambios remotos y arranque. */
-const APP_VERSION = '9.0.0';
+const APP_VERSION = '10.0.0';
 const KIND_KEY = { tx: 'txs', acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals', debt: 'debts', asset: 'assets' };
 const strip = o => JSON.parse(JSON.stringify(o)); // Firestore no acepta "undefined"
 
@@ -78,7 +78,7 @@ function syncBadge() {
   const C = window.Cloud;
   if (!C || !C.enabled || !C.hid) return '';
   const st = { ok: ['ok', 'Sincronizado'], pend: ['pend', 'Enviando…'], off: ['off', 'Sin conexión'], err: ['off', 'Error'] }[C.status] || ['', 'Conectando…'];
-  return `<span class="sync ${st[0]}" onclick="go('set')" title="Sincronización: ${st[1]}"><i class="dot"></i>${st[1]}</span>`;
+  return `<span class="sync ${st[0]}" role="button" onclick="setSub='nube';go('set')" title="Sincronización: ${st[1]}" aria-label="Sincronización: ${st[1]}"><i class="dot"></i><span class="stx">${st[1]}</span></span>`;
 }
 function cloudSection() {
   const C = window.Cloud;

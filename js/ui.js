@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['ui.js'] = '9.0.0';
+(window.__V = window.__V || {})['ui.js'] = '10.0.0';
 /* Mis finanzas — utilidades de interfaz, acciones (guardar/borrar) y navegación. */
 const dlg = document.getElementById('dlg');
 const $ = id => document.getElementById(id);
@@ -118,8 +118,8 @@ async function resetAll() {
 }
 
 // ============ navegación ============
-const NAV = ['home', 'hist', 'acc', 'bud', 'more'];
-const UNDER_MORE = ['more', 'rep', 'rec', 'goal', 'set', 'shared', 'plan', 'trash', 'debts', 'tools'];
+const NAV = ['home', 'hist', 'acc', 'more'];
+const UNDER_MORE = ['more', 'bud', 'rep', 'rec', 'goal', 'set', 'shared', 'plan', 'trash', 'debts', 'tools'];
 function go(t) { tab = t; if (dlg.open) dlg.close(); render(); scrollTo(0, 0); }
 function pre(k) {
   const n = new Date(), y = n.getFullYear(), m = n.getMonth(), f = (mm, d) => new Date(Date.UTC(y, mm, d)).toISOString().slice(0, 10);
@@ -141,13 +141,17 @@ function fbar(hist) {
 ${sel('Tipo', 't', types)}${sel('Categoría', 'c', all)}${sel('Persona', 'w', cfg.people)}${sel('Cuenta', 'acc', accs.map(a => ({ v: a.id, l: a.name })))}</div>
 ${activeFilters() ? `<button class="link" style="margin-top:6px" onclick="F={q:F.q,open:F.open,showDel:F.showDel};render()">Quitar filtros</button>` : ''}`;
 }
-function dlgShow() { if (!dlg.open) dlg.showModal(); }
+function dlgShow() { if (!dlg.open) dlg.showModal(); const f = document.activeElement; if (f && f.closest && f.closest('#dlg .segc, #dlg .sheethd')) f.blur(); } // sin anillo de foco en las pestañas al abrir
+// Tocar fuera de la hoja la cierra (como en las apps del teléfono)
+dlg.addEventListener('click', e => { if (e.target != dlg) return; const r = dlg.getBoundingClientRect(); if (e.clientY < r.top || e.clientY > r.bottom || e.clientX < r.left || e.clientX > r.right) dlg.close(); });
 
 function eyeBtn() { return `<button class="iconbtn" aria-label="${HIDE ? 'Mostrar montos' : 'Ocultar montos'}" title="${HIDE ? 'Mostrar montos' : 'Ocultar montos'}" onclick="toggleHide()"><i class="icon-${HIDE ? 'eye-off' : 'eye'}"></i></button>`; }
 function toggleHide() { HIDE = !HIDE; try { localStorage.setItem('fin_hide', HIDE ? '1' : '0'); } catch (e) { } render(); }
 function head(title, back) {
   return `${back ? `<button class="back" onclick="go('more')"><i class="icon-chevron-left"></i> Más</button>` : ''}<div class="top"><h1>${title}</h1><div class="tools">${syncBadge()}${eyeBtn()}</div></div>`;
 }
+// Selector de mes compacto (‹ Octubre 2026 ›)
+const monthNav = (ym, v) => `<div class="mnav"><button class="iconbtn" aria-label="Mes anterior" onclick="${v}=addMonths(${v},-1);render()"><i class="icon-chevron-left"></i></button><b>${ymLabel(ym)}</b><button class="iconbtn" aria-label="Mes siguiente" onclick="${v}=addMonths(${v},1);render()"><i class="icon-chevron-right"></i></button></div>`;
 
 function render() {
   const active = UNDER_MORE.includes(tab) ? 'more' : tab;

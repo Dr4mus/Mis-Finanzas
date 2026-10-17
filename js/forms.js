@@ -1,8 +1,12 @@
 'use strict';
-(window.__V = window.__V || {})['forms.js'] = '9.0.0';
+(window.__V = window.__V || {})['forms.js'] = '10.0.0';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
-function mvTabs(c) { return `<div class="seg sm">${[['m', 'Ingreso / Egreso', 'openForm()'], ['t', 'Transferir', 'goTr()'], ['g', 'Metas', 'openContribForm()']].map(([k, l, fn]) => `<button type="button" class="${c == k ? 'on' : ''}" onclick="${fn}">${l}</button>`).join('')}</div>`; }
+// Un solo control para el tipo: Egreso · Ingreso · Transferir · Meta
+function mvTabs(c) {
+  const go = k => k == 'e' || k == 'i' ? (c == 'e' || c == 'i' ? `sk('t','${k}')` : `openForm(null,'${k}')`) : k == 't' ? 'goTr()' : 'openContribForm()';
+  return `<div class="segc" role="tablist">${[['e', 'Egreso'], ['i', 'Ingreso'], ['t', 'Transferir'], ['g', 'Meta']].map(([k, l]) => `<button type="button" role="tab" aria-selected="${c == k}" class="${k}${c == k ? ' on' : ''}" onclick="${go(k)}">${l}</button>`).join('')}</div>`;
+}
 const footer = (id, delFn, extra = '') => `<div class="seg"><button type="button" onclick="dlg.close()">Cancelar</button><button class="p">Guardar</button></div>${id ? `<div class="seg sm">${extra}<button type="button" class="d" onclick="${delFn}"><i class="icon-trash-2"></i> Borrar</button></div>` : ''}`;
 // Saldo insuficiente: avisa, pero deja guardar (por si olvidaste anotar un ingreso)
 async function enoughOrAsk(acc, amount, date, exceptId) {
@@ -15,13 +19,13 @@ const beforeOpen = (acc, d) => acc && acc.openDate && d < acc.openDate ? fail(`L
 
 // ============ ingreso / egreso (formulario rápido) ============
 let fm = {};
-function openForm(id) {
+function openForm(id, t) {
   if (!accs.length) { dlg.innerHTML = `<h2>Primero crea una cuenta</h2><p class="mut">Todo movimiento pertenece a una cuenta (efectivo, banco, tarjeta…).</p><div class="seg"><button type="button" onclick="dlg.close()">Cerrar</button><button class="p" onclick="dlg.close();go('acc');openAccForm()">Crear cuenta</button></div>`; return dlgShow(); }
   const x = txs.find(t => t.id == id) || {}, L = lastUsed();
   let accId = x.accId || (!x.id && accs.some(a => a.id == L.accId) ? L.accId : '');
   if (accId && !accs.some(a => a.id == accId)) accId = '';
   if (!accId) accId = accs[0].id;
-  fm = { id: x.id, t: x.t || 'e', d: x.d || today(), a: x.a || '', cu: x.cu || (!x.id && L.cu) || 'DOP', r: x.r || '', aa: x.aa ?? '', c: x.c, sub: x.sub || '', w: x.w || defaultWho(), accId, n: x.n || '', split: x.split || '', cr: x.cr, rec: x.rec, byName: x.byName, accWasMissing: !!(x.accId && x.accId != accId), tags: x.tags || [], grp: x.grp, cTouched: !!x.id };
+  fm = { id: x.id, t: x.t || (t == 'i' ? 'i' : 'e'), d: x.d || today(), a: x.a || '', cu: x.cu || (!x.id && L.cu) || 'DOP', r: x.r || '', aa: x.aa ?? '', c: x.c, sub: x.sub || '', w: x.w || defaultWho(), accId, n: x.n || '', split: x.split || '', cr: x.cr, rec: x.rec, byName: x.byName, accWasMissing: !!(x.accId && x.accId != accId), tags: x.tags || [], grp: x.grp, cTouched: !!x.id, rev: x.rev, c0: x.c };
   if (fm.cu != 'DOP' && !fm.r) fm.r = rateOf(fm.cu, fm.d) || '';
   drawForm(); dlgShow();
   if (!fm.id) setTimeout(() => { const el = $('amt'); if (el) el.focus(); }, 60);
@@ -33,9 +37,9 @@ function drawForm() {
   const extra = f.c && !names.includes(f.c) ? [{ n: f.c, icon: 'tag' }] : [];
   const ppl = [...new Set([...cfg.people, f.w].filter(Boolean))], cu = [...new Set(['DOP', f.cu, ...cfg.cur])], subs = (cfg.subs || {})[f.c] || [];
   const ac = needAA(f), ra = ac && rateOf(ac.currency, f.d), est = ac && f.a && ra && (f.cu == 'DOP' || f.r) ? round2(f.a * (f.cu == 'DOP' ? 1 : f.r) / ra) : '';
-  dlg.innerHTML = `<form onsubmit="return sv(event)"><h2>${f.id ? 'Editar' : 'Nuevo'} movimiento</h2>${f.id ? '' : mvTabs('m')}
+  dlg.innerHTML = `<form onsubmit="return sv(event)"><h2>${f.id ? 'Editar movimiento' : 'Nuevo movimiento'}${f.rev ? ' <span class="revtag">por revisar</span>' : ''}</h2>
+${f.id ? `<div class="segc"><button type="button" class="e${f.t == 'e' ? ' on' : ''}" onclick="sk('t','e')">Egreso</button><button type="button" class="i${f.t == 'i' ? ' on' : ''}" onclick="sk('t','i')">Ingreso</button></div>` : mvTabs(f.t)}
 ${f.accWasMissing ? '<p class="note">La cuenta original ya no existe. Elige otra abajo.</p>' : ''}
-<div class="seg"><button type="button" class="e${f.t == 'e' ? ' on' : ''}" onclick="sk('t','e')">Egreso</button><button type="button" class="i${f.t == 'i' ? ' on' : ''}" onclick="sk('t','i')">Ingreso</button></div>
 <div class="amount"><input id="amt" type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00" aria-label="Monto" value="${esc(f.a)}" oninput="fm.a=this.value" onchange="if(needAA(fm))drawForm()"><select aria-label="Moneda" onchange="sk('cu',this.value)">${opts(cu, f.cu)}</select></div>
 ${f.cu != 'DOP' ? `<label>Tasa: 1 ${esc(f.cu)} = ? DOP<input type="number" inputmode="decimal" step="0.0001" min="0.0001" required value="${esc(f.r)}" oninput="fm.r=this.value" onchange="if(needAA(fm))drawForm()"></label>` : ''}
 <div class="catgrid" role="listbox" aria-label="Categoría">${[...extra, ...cats].map(c => `<button type="button" class="${c.n == f.c ? 'on' : ''}" data-n="${esc(c.n)}" onclick="sk('c',this.dataset.n)"><i class="icon-${esc(c.icon)}"></i>${esc(c.n)}</button>`).join('')}</div>
@@ -56,9 +60,9 @@ ${footer(f.id, `delTx('${f.id}')`, `<button type="button" onclick="dupTx()"><i c
   dlgShow();
 }
 function sk(k, v) {
-  fm[k] = v;
+  const old = fm[k]; fm[k] = v;
   if (k == 't') { fm.c = null; fm.sub = ''; fm.split = ''; fm.ruleHit = ''; }
-  if (k == 'c') { fm.sub = ''; fm.cTouched = true; fm.ruleHit = ''; }
+  if (k == 'c') { if (((cfg.subs || {})[old] || []).includes(fm.sub)) fm.sub = ''; fm.cTouched = true; fm.ruleHit = ''; } // el comercio escrito a mano se queda; la subcategoría de la otra categoría no
   if (k == 'cu' || k == 'accId') fm.aa = '';
   if ((k == 'cu' || k == 'd') && fm.cu != 'DOP') fm.r = rateOf(fm.cu, fm.d) || fm.r;
   drawForm();
@@ -68,7 +72,7 @@ function autoRule() {
   if (fm.cTouched) return; const r = matchRule((fm.sub || '') + ' ' + (fm.n || ''), fm.t);
   if (r && (r.c != fm.c || fm.ruleHit != r.m)) { const keep = { sub: fm.sub, n: fm.n }, el = document.activeElement, id = el && el.getAttribute('aria-label'), pos = el && el.selectionStart; fm.c = r.c; fm.ruleHit = r.m; drawForm(); Object.assign(fm, keep); const back = id && dlg.querySelector(`[aria-label="${id}"]`); if (back) { back.focus(); try { back.setSelectionRange(pos, pos); } catch (e) { } } }
 }
-function dupTx() { Object.assign(fm, { id: undefined, d: today(), cr: undefined, rec: undefined, byName: undefined }); drawForm(); toast('Copia lista con fecha de hoy: revisa y guarda.'); }
+function dupTx() { Object.assign(fm, { id: undefined, d: today(), cr: undefined, rec: undefined, byName: undefined, rev: undefined, c0: undefined }); drawForm(); toast('Copia lista con fecha de hoy: revisa y guarda.'); }
 async function sv(e) {
   e.preventDefault(); const f = fm, a = parseFloat(f.a), r = f.cu == 'DOP' ? 1 : parseFloat(f.r);
   if (!(a > 0)) return fail('Escribe un monto mayor que cero.');
@@ -86,7 +90,18 @@ async function sv(e) {
   if (f.rec) o.rec = f.rec; if (f.byName) o.byName = f.byName;
   if (f.t == 'e' && f.split && f.split != 'for:' + f.w) o.split = f.split;
   rememberLast({ accId: f.accId, cu: f.cu, w: f.w });
-  const isNew = !f.id; saveTx(o); dlg.close(); toast(isNew ? 'Movimiento guardado' : 'Cambios guardados', { kind: 'ok' }); return false;
+  // guardar = revisado (si venía de una importación)
+  const isNew = !f.id; saveTx(o); dlg.close(); toast(isNew ? 'Movimiento guardado' : 'Cambios guardados', { kind: 'ok' });
+  if (!isNew && f.c0 && f.c0 != o.c && o.sub) offerRecat(o, f.c0);
+  return false;
+}
+
+// Cambiaste la categoría de algo con detalle (ej. “UBER”): ofrece cambiar también los demás iguales y crear la regla
+function offerRecat(o, old) {
+  const key = norm(o.sub), same = txs.filter(x => x.id != o.id && x.t == o.t && x.c == old && norm(x.sub) == key);
+  const rule = () => { if (!matchRule(o.sub, o.t)) { const cf = deep(cfg); cf.rules = [...(cf.rules || []), { id: uid(), m: o.sub.trim().toLowerCase().slice(0, 40), t: o.t, c: o.c, sub: '' }]; saveCfg(cf); toast('Regla creada: “' + o.sub + '” → ' + o.c, { kind: 'ok' }); } };
+  if (same.length) toast(`¿Cambiar también ${same.length} más de “${o.sub}” a ${o.c}?`, { action: 'Cambiar', ms: 9000, onAction: () => { bulkTxs(same.map(x => { const { rev, ...y } = x; return { ...y, c: o.c }; })); render(); toast(`${same.length} cambiados`, { kind: 'ok', action: matchRule(o.sub, o.t) ? '' : 'Crear regla', onAction: rule }); } });
+  else if (!matchRule(o.sub, o.t)) toast(`¿Siempre “${o.sub}” → ${o.c}?`, { action: 'Crear regla', ms: 8000, onAction: rule });
 }
 
 // ============ cuentas ============
@@ -598,9 +613,9 @@ function cp() {
 function fi(el) { const f = el.files[0]; if (f) f.text().then(t => merge(t, $('rp').checked)); el.value = ''; }
 
 // ============ Excel (la librería se carga solo al usarla) ============
-function loadScript(src) { return new Promise((ok, ko) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = ko; document.head.appendChild(s); }); }
+function loadScript(src) { return new Promise((ok, ko) => { if (document.querySelector(`script[src="${src}"]`)) return ok(); const s = document.createElement('script'); s.src = src; s.onload = ok; s.onerror = () => { s.remove(); ko(); }; document.head.appendChild(s); }); }
 async function xl() {
-  const a = fl(); if (!a.length) return fail('No hay ingresos ni egresos para exportar con los filtros del Historial.');
+  const a = fl(); if (!a.length) return fail('No hay ingresos ni egresos para exportar con los filtros de Movimientos.');
   try { if (typeof XLSX == 'undefined') await loadScript('vendor/xlsx.mini.min.js'); } catch (e) { return fail('No se pudo cargar el exportador de Excel. Revisa tu conexión.'); }
   const rows = a.map(x => ({ Fecha: x.d, Tipo: x.t == 'i' ? 'Ingreso' : 'Egreso', Categoría: x.c, Detalle: x.sub || '', Persona: x.w, 'Para quién': splitLabel(x), 'Anotado por': x.byName || '', Cuenta: (accs.find(c => c.id == x.accId) || {}).name || '', Monto: x.a, Moneda: x.cu || 'DOP', Tasa: x.r, 'Monto en DOP': x.v, Nota: x.n || '' }));
   const cat = {}; a.forEach(x => { const k = x.t + '|' + x.c; cat[k] = (cat[k] || 0) + x.v; });

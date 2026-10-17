@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['extras.js'] = '9.0.0';
+(window.__V = window.__V || {})['extras.js'] = '10.0.0';
 /* Mis finanzas — atajos, Inicio personalizable, bienvenida, papelera y recordatorio de respaldo. */
 
 // ============ atajos de movimientos frecuentes ============
@@ -7,12 +7,9 @@
 const shortcuts = () => cfg.shortcuts || [];
 function scLabel(s) { return esc(s.name) + (s.a ? ' · ' + money(s.a, s.cu) : ''); }
 function atajosCard() {
-  const list = shortcuts();
-  return `<div class="card"><h2><i class="icon-zap"></i> Atajos</h2>
-${list.length ? `<div class="chips sc">${list.map(s => `<button type="button" data-id="${esc(s.id)}" onclick="useShortcut(this.dataset.id)"><i class="icon-${esc(icoFor(s.c, s.t))}"></i>${scLabel(s)}</button>`).join('')}</div>
-<p class="mini" style="margin:6px 0 0">Un toque y queda anotado (con monto fijo) o se abre listo para poner el monto.</p>`
-      : `<p class="mini" style="margin:0 0 6px">Crea botones para lo que anotas seguido: gasolina, colmado, almuerzo…</p>`}
-<button class="link" onclick="setSub='atajos';go('set')">${list.length ? 'Editar atajos' : '<i class="icon-plus"></i> Crear un atajo'}</button></div>`;
+  const list = shortcuts(); if (!list.length) return ''; // sin atajos no ocupa espacio (se crean en Ajustes o desde el formulario)
+  return `<div class="card"><h2><i class="icon-zap"></i> Atajos <button class="link" style="margin-left:auto;font-size:13px" onclick="setSub='atajos';go('set')">Editar</button></h2>
+<div class="chips sc">${list.map(s => `<button type="button" data-id="${esc(s.id)}" onclick="useShortcut(this.dataset.id)"><i class="icon-${esc(icoFor(s.c, s.t))}"></i>${scLabel(s)}</button>`).join('')}</div></div>`;
 }
 async function useShortcut(id) {
   const s = shortcuts().find(x => x.id == id); if (!s) return;
@@ -86,8 +83,9 @@ ${l.map((s, i) => `<div class="row">${circ(s.name, icoFor(s.c, s.t))}<div><b>${e
 
 // ============ Inicio personalizable (en cada teléfono) ============
 const HOME_CARDS = [
-  ['saldo', 'Saldo disponible y patrimonio'], ['alcanza', '¿Te alcanza hasta el próximo ingreso?'], ['atajos', 'Atajos'], ['mes', 'Resumen del mes'],
-  ['alertas', 'Pendientes y alertas'], ['promedio', 'Comparado con tu promedio'], ['metas', 'Metas'], ['recientes', 'Últimos movimientos']
+  ['saldo', 'Saldo disponible y patrimonio'], ['accesos', 'Accesos rápidos'], ['revisar', 'Movimientos por revisar'], ['parati', 'Para ti (lo más importante)'],
+  ['alertas', 'Pendientes y alertas'], ['alcanza', '¿Te alcanza hasta el próximo ingreso?'], ['mes', 'Resumen del mes'], ['atajos', 'Atajos (si tienes)'],
+  ['promedio', 'Comparado con tu promedio'], ['metas', 'Metas'], ['recientes', 'Últimos movimientos']
 ];
 function homeLayout() {
   let saved = null; try { saved = JSON.parse(localStorage.getItem('fin_home')); } catch (e) { }
@@ -187,7 +185,7 @@ function renderWelcome(app) {
 <div class="seg sm" style="margin-top:10px">${[['claro', 'sun', 'Claro'], ['dark', 'moon', 'Oscuro'], ['auto', 'monitor', 'Auto']].map(([t, i, l]) => `<button type="button" class="${theme == t ? 'on' : ''}" onclick="theme='${t}';try{localStorage.setItem('fin_theme','${t}')}catch(e){};applyTheme();render()"><i class="icon-${i}"></i> ${l}</button>`).join('')}</div>
 <div class="seg">${back}<button class="p" onclick="wz.step=4;render()">Siguiente</button></div>`;
   else body = `<h1>¡Todo listo!</h1>
-<div class="wlist"><div><i class="icon-plus"></i><span>Toca <b>+ Movimiento</b> para anotar un gasto o ingreso.</span></div><div><i class="icon-zap"></i><span>Crea <b>atajos</b> para lo que anotas seguido.</span></div><div><i class="icon-repeat"></i><span>Pon tu salario y facturas en <b>Más → Recurrentes</b>.</span></div><div><i class="icon-lock"></i><span>Protege la app con PIN o Face ID en <b>Ajustes</b>.</span></div></div>
+<div class="wlist"><div><i class="icon-plus"></i><span>Toca el botón <b>+</b> de abajo para anotar un gasto o ingreso.</span></div><div><i class="icon-zap"></i><span>Crea <b>atajos</b> para lo que anotas seguido.</span></div><div><i class="icon-repeat"></i><span>Pon tu salario y facturas en <b>Más → Recurrentes</b>.</span></div><div><i class="icon-lock"></i><span>Protege la app con PIN o Face ID en <b>Ajustes</b>.</span></div></div>
 ${window.Cloud && window.Cloud.enabled ? `<p class="mini">Para tener tus datos respaldados en la nube y compartirlos con tu pareja: <b>Más → Ajustes → Nube y hogar</b>.</p>` : `<p class="mini">Por ahora todo se guarda en este teléfono. Para respaldar en la nube y compartir con tu pareja, sigue la parte “Firebase” de la guía PDF.</p>`}
 <button class="p big" onclick="endWelcome()">Ir a Inicio</button>${window.Cloud && window.Cloud.enabled ? `<button onclick="endWelcome('set')">Configurar la nube ahora</button>` : ''}`;
   app.innerHTML = `<div class="welcome">${dots}${body}</div>`;

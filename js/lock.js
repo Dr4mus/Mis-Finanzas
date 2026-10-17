@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['lock.js'] = '9.0.0';
+(window.__V = window.__V || {})['lock.js'] = '10.0.0';
 /* Mis finanzas — bloqueo con PIN y Face ID / huella (WebAuthn del propio teléfono).
    Es un bloqueo local de la app en este teléfono; los datos de la nube además requieren tu cuenta. */
 const LOCK = { key: 'fin_pin', bio: 'fin_bio', after: 'fin_lock_after' };
@@ -93,7 +93,7 @@ function securitySection() {
   return `<div class="card"><h2><i class="icon-lock"></i> Seguridad y privacidad</h2>
 <div class="row"><div><b>Bloqueo con PIN</b><small>${c ? 'Activado en este teléfono' : 'Pide un PIN al abrir la app'}</small></div>${c ? `<button onclick="openPinSetup()">Cambiar</button><button class="d" onclick="removePin()">Quitar</button>` : `<button class="p" onclick="openPinSetup()">Activar</button>`}</div>
 ${c ? `<div class="row"><div><b>Face ID / huella</b><small>${BIO_OK === false && !bio ? 'No disponible en este teléfono o navegador' : bio ? 'Activado' : 'Desbloquea sin escribir el PIN'}</small></div>${bio ? `<button class="d" onclick="removeBio()">Quitar</button>` : BIO_OK ? `<button class="p" onclick="enrollBio()">Activar</button>` : ''}</div>
-<div class="row"><div><b>Bloquear al salir</b><small>Tiempo fuera de la app</small></div><select style="width:auto;flex:none" onchange="setLockAfter(this.value)">${[[0, 'Al instante'], [60, '1 minuto'], [300, '5 minutos'], [900, '15 minutos']].map(([v, l]) => `<option value="${v}"${lockAfter() == v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
+<div class="row"><div><b>Bloquear al salir</b><small>Tiempo fuera de la app</small></div><select style="width:auto;flex:none" onchange="setLockAfter(this.value)">${[[0, 'Al instante'], [60, '1 minuto'], [300, '5 minutos'], [900, '15 minutos'], [1800, '30 minutos'], [3600, '1 hora']].map(([v, l]) => `<option value="${v}"${lockAfter() == v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>
 <button class="link" onclick="showLock()"><i class="icon-lock"></i> Bloquear ahora</button>` : ''}
 <div class="row"><div><b>Ocultar montos</b><small>Esconde las cifras; también con el ojo de arriba</small></div><label class="toggle"><input type="checkbox" ${HIDE ? 'checked' : ''} onchange="toggleHide()" aria-label="Ocultar montos"></label></div>
 <p class="mini" style="margin:6px 0 0">El bloqueo protege la app en este teléfono. Tus datos en la nube, además, solo se abren con tu correo y contraseña.</p></div>`;

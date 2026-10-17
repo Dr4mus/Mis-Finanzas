@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['screens.js'] = '9.0.0';
+(window.__V = window.__V || {})['screens.js'] = '10.0.0';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
@@ -11,7 +11,16 @@ function chartBase() {
   const o = { responsive: true, maintainAspectRatio: true, plugins: { legend: { labels: { boxWidth: 12, boxHeight: 12 } }, tooltip: { callbacks: { label: c => (c.dataset.label ? c.dataset.label + ': ' : '') + money(c.raw) } } }, scales: { y: { ticks: { callback: axisFmt } } } };
   return { V, o, pal: [V('--brand'), V('--pink'), V('--yellow'), V('--teal'), V('--blue'), V('--out'), '#8d6e63', '#6b5b95', '#5b8c5a', '#c9a227', '#4a90a4', '#e07a5f'] };
 }
-const noCharts = () => typeof Chart == 'undefined' && (document.querySelectorAll('#app canvas').forEach(c => c.outerHTML = '<p class="empty">No se pudieron cargar las gráficas.</p>'), true);
+// Las gráficas (Chart.js, 200 KB) se cargan solo cuando una pantalla las necesita: la app abre más rápido.
+let chartLoad = null;
+function noCharts() {
+  if (typeof Chart != 'undefined') return false;
+  if (chartLoad == 'ok') chartLoad = 'fail'; // cargó pero no trajo Chart
+  if (!chartLoad) chartLoad = loadScript('vendor/chart.umd.js').then(() => { chartLoad = 'ok'; render(); }, () => { chartLoad = 'fail'; render(); });
+  document.querySelectorAll('#app canvas').forEach(c => c.outerHTML = `<p class="empty">${chartLoad == 'fail' ? 'No se pudieron cargar las gráficas. Revisa tu conexión y vuelve a abrir esta pantalla.' : 'Cargando gráficas…'}</p>`);
+  if (chartLoad == 'fail') chartLoad = null; // la próxima vez lo intenta de nuevo
+  return true;
+}
 
 // ============ filas de movimientos ============
 function histRow(x, gone) {
@@ -31,7 +40,8 @@ function histRow(x, gone) {
     amt = (x.a > 0 ? '+' : x.a < 0 ? '−' : '') + money(Math.abs(x.v), x.cu || 'DOP'); cls = x.a > 0 ? 'in' : x.a < 0 ? 'out' : ''; open = dbt ? `openDebt('${dbt.id}')` : `go('debts')`;
     if (acc) sub.push(esc(acc.name)); else sub.push('sin cuenta');
   } else {
-    ic = icoFor(x.c, x.t); ti = esc(x.c) + (x.sub ? ' · ' + esc(x.sub) : ''); amt = (x.t == 'i' ? '+' : '−') + money(x.v); cls = x.t == 'i' ? 'in' : 'out'; open = `openForm('${x.id}')`;
+    ic = icoFor(x.c, x.t); ti = x.sub ? esc(x.sub) : esc(x.c); amt = (x.t == 'i' ? '+' : '−') + money(x.v); cls = x.t == 'i' ? 'in' : 'out'; open = `openForm('${x.id}')`;
+    if (x.sub) sub.push(esc(x.c));
     if (acc) sub.push(esc(acc.name));
   }
   if (x.w && x.t != 'st' && x.t != 'dm') sub.push(esc(x.w) + (x.split ? ' · ' + esc(splitLabel(x)) : ''));
@@ -40,7 +50,7 @@ function histRow(x, gone) {
   if (x.n) sub.push(esc(x.n));
   if ((x.tags || []).length) sub.push(x.tags.map(t => '#' + esc(t)).join(' '));
   return `<div class="row${gone ? ' gone' : ' tap'}"${gone ? '' : ` onclick="${open}"`}>${circ(x.c || x.t, ic)}
-<div><b>${ti}</b><small>${sub.join(' · ')}${gone ? ' · borrado' : ''}</small></div>
+<div><b>${ti}${x.rev && !gone ? '<span class="revtag">revisar</span>' : ''}</b><small>${sub.join(' · ')}${gone ? ' · borrado' : ''}</small></div>
 <b class="${cls} num">${amt}</b>${gone ? `<button onclick="restoreTx('${x.id}')">Restaurar</button>` : ''}</div>`;
 }
 
@@ -79,38 +89,43 @@ function renderHome(app) {
   const cards = {
     saldo: () => {
       const tot = totalsByCurrency(), dop = tot.DOP || { disp: 0, deuda: 0, neto: 0 }, others = Object.entries(tot).filter(([c]) => c != 'DOP'), nw = netWorthApprox(), approx = others.length || nw.missing.length;
-      return `<div class="card hero"><small>Disponible en pesos</small><div class="big">${money(dop.disp)}</div>
-<div class="split" onclick="debtTab='loans';go('debts')" style="cursor:pointer"><div><small>Patrimonio neto</small><b>${money(nw.total)}${approx ? '*' : ''}</b></div><div><small>Deudas</small><b>${money(round2(dop.deuda + debts.filter(d => d.dir == 'owe').reduce((q, d) => q + convert(debtLeft(d), d.cu, 'DOP', td), 0)))}</b></div></div>
-${others.map(([c, t]) => `<small style="display:block;margin-top:6px">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}
-${approx ? `<small style="display:block;margin-top:2px">* Todo convertido a pesos${nw.missing.length ? ' (sin tasa para ' + nw.missing.join(', ') + ')' : ''}</small>` : ''}</div>`;
+      const deuda = round2(dop.deuda + debts.filter(d => d.dir == 'owe').reduce((q, d) => q + convert(debtLeft(d), d.cu, 'DOP', td), 0));
+      return `<div class="card hero" role="button" onclick="go('acc')"><small>Disponible en pesos</small><div class="big">${money(dop.disp)}</div>
+<div class="split"><div onclick="event.stopPropagation();repTab='nw';go('rep')"><small>Patrimonio neto${approx ? '*' : ''}</small><b>${money(nw.total)}</b></div><div onclick="event.stopPropagation();debtTab='loans';go('debts')"><small>Deudas</small><b>${money(deuda)}</b></div></div>
+${others.map(([c, t]) => `<small class="hx">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}
+${approx ? `<small class="hx">* Todo convertido a pesos${nw.missing.length ? ' (sin tasa para ' + nw.missing.join(', ') + ')' : ''}</small>` : ''}</div>`;
     },
+    accesos: () => `<div class="qa">${[['pie-chart', 'Presupuesto', "go('bud')", 'brand'], ['calendar-days', 'Planificar', "go('plan')", 'blue'], ['arrow-left-right', 'Transferir', 'goTr()', 'teal'], ['bar-chart-3', 'Reportes', "repTab='res';go('rep')", 'pink']].map(([ic, l, f, c]) => `<button type="button" onclick="${f}"><span class="circ" style="color:var(--${c})"><i class="icon-${ic}"></i></span>${l}</button>`).join('')}</div>`,
+    revisar: () => reviewCard(),
+    parati: () => insightsCard(),
     alcanza: () => alcanzaCard(false),
     atajos: () => atajosCard(),
     mes: () => {
       const st = monthStats(ym), b = budgetFor(ym), bst = budgetStatus(st.exp, b.total);
       const dim = +monthEnd(ym).slice(8, 10), dd = +td.slice(8, 10), pace = Math.round(dd / dim * 100), left = b.total - st.exp;
+      const cc = catCompare(ym), usual = cc && cc.avgTot > 0 ? Math.round(Math.min(1, cc.expTot / cc.avgTot) * 100) : pace; // lo que sueles llevar a esta altura
       const col = bst ? barCol(bst.level) : 'var(--brand)', pct = bst ? Math.min(100, bst.pct) : 0;
       return `<div class="card"><h2><i class="icon-pie-chart"></i> ${ymLabel(ym)[0].toUpperCase() + ymLabel(ym).slice(1)}</h2>
-<div class="month"><div class="ring" style="background:conic-gradient(${col} ${pct}%,var(--soft) 0)"><div>${bst ? bst.pct + '%' : '—'}</div></div>
+<div class="month" role="button" onclick="go('bud')"><div class="ring" style="background:conic-gradient(${col} ${pct}%,var(--soft) 0)"><div>${bst ? bst.pct + '%' : '—'}</div></div>
 <div style="min-width:0;flex:1"><small class="mut">${b.total ? (left >= 0 ? 'Te queda para gastar' : 'Te pasaste por') : 'Gastado este mes'}</small>
-<div class="num" style="font-size:24px;font-weight:800;color:${left < 0 && b.total ? 'var(--out)' : 'var(--ink)'}">${money(b.total ? Math.abs(left) : st.exp)}</div>
-<small class="mut">${b.total ? money(st.exp) + ' de ' + money(b.total) : `<button class="link" onclick="go('bud')">Define un tope</button>`}</small></div></div>
-<div style="margin-top:12px"><small class="mut">Día ${dd} de ${dim}${bst && bst.pct > pace + 10 ? ' · <b class="warn">vas más rápido que el mes</b>' : ''}</small>${bar(pace, 'var(--brand)')}</div>
+<div class="num" style="font-size:26px;font-weight:800;letter-spacing:-.02em;color:${left < 0 && b.total ? 'var(--out)' : 'var(--ink)'}">${money(b.total ? Math.abs(left) : st.exp)}</div>
+<small class="mut">${b.total ? money(st.exp) + ' de ' + money(b.total) : 'Toca para definir un tope'}</small></div></div>
+<div style="margin-top:12px"><small class="mut">Día ${dd} de ${dim}${bst && bst.pct > usual + 10 ? ' · <b class="warn">vas más rápido de lo normal</b>' : ''}</small>${bar(pace, 'var(--brand)')}</div>
 <div class="trio"><div><small>Ingresos</small><b class="in">${money(st.inc)}</b></div><div><small>Egresos</small><b class="out">${money(st.exp)}</b></div><div><small>Ahorro</small><b>${st.rate == null ? '—' : st.rate + '%'}</b></div></div></div>`;
     },
-    alertas: () => { const al = alertsHTML(); return `<div class="card"><h2><i class="icon-bell${al ? ' ring' : ''}"></i> Pendientes y alertas</h2>${al || '<p class="mut" style="margin:0">Todo tranquilo: nada pendiente ni cerca del límite.</p>'}</div>`; },
+    alertas: () => { const al = alertsHTML(); return al ? `<div class="card"><h2><i class="icon-bell alarm"></i> Pendientes y alertas</h2>${al}</div>` : ''; },
     promedio: () => promedioCard(),
-    metas: () => goals.length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${goals.map(g => { const p = goalProgress(g), c = accentFor(g.name); return `<div style="margin-bottom:10px"><div style="display:flex;justify-content:space-between;gap:8px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:700">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}</small></div>`; }).join('')}<button class="link" onclick="go('goal')">Ver metas</button></div>` : '',
+    metas: () => goals.length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${goals.map(g => { const p = goalProgress(g), c = accentFor(g.name); return `<div style="margin-bottom:12px" role="button" onclick="go('goal')"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:800">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}</small></div>`; }).join('')}</div>` : '',
     recientes: () => {
-      const recent = txs.slice().sort((p, q) => q.d.localeCompare(p.d) || (q.cr || 0) - (p.cr || 0)).slice(0, 5);
-      return `<div class="card"><h2><i class="icon-list"></i> Últimos movimientos</h2>${recent.length ? recent.map(x => histRow(x)).join('') + `<button class="link" onclick="go('hist')">Ver historial</button>` : '<p class="empty">Aún no hay movimientos. Toca “+ Movimiento” para empezar.</p>'}</div>`;
+      const recent = latestTxs(5);
+      return `<div class="card"><h2><i class="icon-list"></i> Últimos movimientos</h2>${recent.length ? recent.map(x => histRow(x)).join('') + `<button class="link" onclick="go('hist')">Ver todos</button>` : '<p class="empty">Aún no hay movimientos. Toca el botón <b>+</b> de abajo para anotar el primero.</p>'}</div>`;
     }
   };
   const body = homeLayout().filter(c => c.on && cards[c.id]).map(c => { try { return cards[c.id](); } catch (e) { console.error(e); return `<div class="card"><p class="warnline" style="margin:0">No se pudo mostrar esta tarjeta: ${esc(e.message)}</p></div>`; } }).join('');
-  app.innerHTML = `${head(`<span class="hello"><img class="crest-sm" src="icons/escudo-mini.webp" alt="">${me ? 'Hola, ' + esc(me) : 'Inicio'}</span>`)}
+  const f0 = new Date(td + 'T12:00:00').toLocaleDateString('es-DO', { weekday: 'long', day: 'numeric', month: 'long' }), fecha = f0[0].toUpperCase() + f0.slice(1);
+  app.innerHTML = `<div class="top"><span class="hello"><img class="crest-sm" src="icons/escudo-mini.webp" alt=""><span><b>${me ? 'Hola, ' + esc(me) : 'Inicio'}</b><small>${fecha}</small></span></span><div class="tools">${syncBadge()}${eyeBtn()}</div></div>
 ${body}
-<div class="seg" style="margin-top:4px"><button onclick="go('rep')"><i class="icon-bar-chart-3"></i> Reportes</button><button onclick="go('plan')"><i class="icon-calendar-days"></i> Planificar</button></div>
-<button class="link" style="margin:6px auto 0;display:flex" onclick="openHomeEdit()"><i class="icon-sliders"></i> Personalizar Inicio</button>`;
+<button class="link homeedit" onclick="openHomeEdit()"><i class="icon-sliders"></i> Personalizar Inicio</button>`;
 }
 
 // ============ Reportes ============
@@ -133,8 +148,7 @@ function renderRep(app) {
 <button style="width:100%" onclick="go('debts')"><i class="icon-hand-coins"></i> Ver deudas y bienes</button>`; }
   else body = `<div class="card">${fbar(false)}${a.length ? `<canvas id="c1" style="margin-top:12px"></canvas>` : '<p class="empty">No hay movimientos con estos filtros.</p>'}</div>`;
   app.innerHTML = `${head('Reportes', true)}
-<div class="card"><div class="add" style="align-items:center"><button class="iconbtn" aria-label="Mes anterior" onclick="repYm=addMonths(repYm,-1);render()"><i class="icon-chevron-left"></i></button>
-<b style="flex:1;text-align:center;text-transform:capitalize">${ymLabel(ym)}</b><button class="iconbtn" aria-label="Mes siguiente" onclick="repYm=addMonths(repYm,1);render()"><i class="icon-chevron-right"></i></button></div></div>
+${monthNav(ym, 'repYm')}
 <div class="chips tabs" style="margin-bottom:12px">${tabs.map(([k, l]) => `<button class="${repTab == k ? 'on' : ''}" onclick="repTab='${k}';render()">${l}</button>`).join('')}</div>
 ${body}`;
   if (noCharts()) return;
@@ -166,63 +180,89 @@ ${body}`;
 // ============ Historial ============
 function renderHist(app) {
   const n = activeFilters();
-  app.innerHTML = `${head('Historial')}
+  const nr = revList().length, qt = [['', 'Todos'], ['e', 'Egresos'], ['i', 'Ingresos'], ['tr', 'Transferencias'], ...(nr || F.rev ? [['rev', `Por revisar (${nr})`]] : [])];
+  app.innerHTML = `${head('Movimientos')}
 <div class="add" style="margin-bottom:10px"><div class="search"><i class="icon-search"></i><input id="q" type="search" placeholder="Buscar: súper, Netflix, 1500…" value="${esc(F.q || '')}" oninput="F.q=this.value;histList()" autocomplete="off"></div>
-<button class="${n ? 'p' : ''}" onclick="F.open=!F.open;render()"><i class="icon-sliders"></i> Filtros${n ? ' (' + n + ')' : ''}</button></div>
+<button class="iconbtn${n ? ' on' : ''}" style="${n ? 'background:var(--brand);color:var(--brand-ink)' : ''}" aria-label="Filtros${n ? ' (' + n + ')' : ''}" onclick="F.open=!F.open;render()"><i class="icon-sliders"></i></button></div>
+<div class="chips tabs" style="margin-bottom:10px">${qt.map(([k, l]) => `<button class="${(k == 'rev' ? F.rev : !F.rev && (F.t || '') == k) ? 'on' : ''}" onclick="${k == 'rev' ? 'F.rev=!F.rev;F.t=\'\'' : `F.rev=false;F.t='${k}'`};render()">${l}</button>`).join('')}</div>
 ${F.open ? `<div class="card">${fbar(true)}<label class="toggle" style="margin-top:10px"><input type="checkbox" ${F.showDel ? 'checked' : ''} onchange="F.showDel=this.checked;render()"> Mostrar movimientos borrados</label></div>` : ''}
 <div id="hlist"></div>`;
   histList();
 }
 function histList() {
   const el = $('hlist'); if (!el) return;
-  const all = [...txs.filter(histMatch).map(x => ({ x, g: 0 })), ...(F.showDel ? trash.filter(histMatch).map(x => ({ x, g: 1 })) : [])].sort((p, q) => q.x.d.localeCompare(p.x.d) || (q.x.cr || 0) - (p.x.cr || 0));
+  const all = [...txs.filter(histMatch).map(x => ({ x, g: 0 })), ...(F.showDel ? trash.filter(histMatch).map(x => ({ x, g: 1 })) : [])].sort((p, q) => (p.x.d < q.x.d ? 1 : p.x.d > q.x.d ? -1 : (q.x.cr || 0) - (p.x.cr || 0)));
   const shown = all.slice(0, F.lim || 200), live = all.filter(r => !r.g).map(r => r.x);
-  const inc = sum(live, 'i'), exp = sum(live, 'e');
+  const inc = sum(live, 'i'), exp = sum(live, 'e'), dayNet = {};
+  live.forEach(y => { if (y.t == 'i') dayNet[y.d] = (dayNet[y.d] || 0) + y.v; else if (y.t == 'e') dayNet[y.d] = (dayNet[y.d] || 0) - y.v; });
   let html = '', day = '';
   for (const { x, g } of shown) {
     if (x.d != day) {
-      day = x.d; const dl = live.filter(y => y.d == day), net = sum(dl, 'i') - sum(dl, 'e');
+      day = x.d; const net = dayNet[day] || 0;
       html += `<div class="dayhead"><span>${fday(day)}</span><span class="num ${net > 0 ? 'in' : net < 0 ? 'out' : ''}">${net ? (net > 0 ? '+' : '−') + money(Math.abs(net)) : ''}</span></div>`;
     }
     html += histRow(x, g);
   }
-  el.innerHTML = all.length ? `<p class="mini" style="margin:0 0 8px">${all.length} movimiento${all.length > 1 ? 's' : ''} · <span class="in">+${money(inc)}</span> · <span class="out">−${money(exp)}</span></p>
+  el.innerHTML = all.length ? `<p class="mini" style="margin:0 0 8px 4px">${all.length} movimiento${all.length > 1 ? 's' : ''} · <span class="in">+${money(inc)}</span> · <span class="out">−${money(exp)}</span></p>
 <div class="card">${html}${all.length > shown.length ? `<button class="link" onclick="F.lim=(F.lim||200)+200;histList()">Ver más (${all.length - shown.length})</button>` : ''}</div>`
-    : `<p class="empty">${F.q ? 'Nada coincide con “' + esc(F.q) + '”.' : 'Sin movimientos con estos filtros.'}</p>`;
+    : `<p class="empty">${!txs.length ? 'Aún no hay movimientos. Toca el botón <b>+</b> de abajo para anotar el primero.' : F.q ? 'Nada coincide con “' + esc(F.q) + '”.' : 'Sin movimientos con estos filtros.'}</p>`;
 }
 
 // ============ Cuentas ============
 let accOwner = '';
 function renderAcc(app) {
-  const asOf = F.accAsOf || undefined, tot = totalsByCurrency(asOf);
+  const asOf = F.accAsOf || undefined, tot = totalsByCurrency(asOf), td = today();
   const owners = cfg.people.length > 1 && accs.some(a => a.owner) ? ['', ...cfg.people.filter(p => accs.some(a => a.owner == p)), '~'] : null;
   const list = accs.filter(a => !accOwner || (accOwner == '~' ? !a.owner : a.owner == accOwner));
   const groups = [['Efectivo y bancos', 'wallet', list.filter(a => !isDebtAcc(a))], ['Tarjetas de crédito', 'credit-card', list.filter(isCard)], ['Préstamos', 'hand-coins', list.filter(isLoan)]];
+  const dop = tot.DOP || { disp: 0, deuda: 0 }, others = Object.entries(tot).filter(([c]) => c != 'DOP');
+  const gsum = l => { const c = {}; l.forEach(a => { const b = acctBalance(a, asOf); c[a.currency] = (c[a.currency] || 0) + (isDebtAcc(a) ? Math.max(0, -b) : b); }); return Object.entries(c).map(([k, v]) => money(v, k)).join(' · '); };
   app.innerHTML = `${head('Cuentas')}
-<div class="kp">${(Object.keys(tot).length ? Object.entries(tot) : [['DOP', { disp: 0, deuda: 0 }]]).map(([c, t]) => `<div><small>Disponible ${c}${asOf ? ' al ' + fdate(asOf) : ''}</small><b>${money(t.disp, c)}</b></div>${accs.some(a => isDebtAcc(a) && a.currency == c) ? `<div><small>Deudas ${c}</small><b class="out">${money(t.deuda, c)}</b></div>` : ''}`).join('')}</div>
-${owners ? `<div class="chips" style="margin-bottom:10px">${owners.map(o => `<button class="${accOwner == o ? 'on' : ''}" data-o="${esc(o)}" onclick="accOwner=this.dataset.o;render()">${o == '' ? 'Todas' : o == '~' ? 'Del hogar' : esc(o)}</button>`).join('')}</div>` : ''}
-${accs.length ? groups.filter(g => g[2].length).map(([t, ic, l]) => `<h3 class="grph"><i class="icon-${ic}"></i> ${t}</h3>${l.slice().sort((x, y) => x.name.localeCompare(y.name)).map(accCard).join('')}`).join('') : '<p class="empty">Aún no tienes cuentas. Agrega la primera.</p>'}
-<div class="seg" style="margin-top:4px"><button class="p" onclick="openAccForm()"><i class="icon-plus"></i> Agregar cuenta</button>${accs.length >= 2 ? `<button onclick="openTransferForm()"><i class="icon-arrow-left-right"></i> Transferir</button>` : ''}</div>
-<details class="card" style="margin-top:12px"${asOf ? ' open' : ''}><summary>Ver saldos a otra fecha ›</summary><div class="add" style="margin-top:8px"><input type="date" value="${esc(asOf || '')}" onchange="F.accAsOf=this.value;render()">${asOf ? `<button onclick="F.accAsOf='';render()">Hoy</button>` : ''}</div></details>`;
+<div class="card sumc"><small>Disponible${asOf ? ' al ' + fdate(asOf) : ''}</small><b class="big">${money(dop.disp)}</b>
+<div class="sum3"><div><small>Deudas en cuentas</small><b class="out">${money(dop.deuda)}</b></div><div><small>Neto</small><b class="${dop.disp - dop.deuda < 0 ? 'out' : ''}">${money(round2(dop.disp - dop.deuda))}</b></div></div>
+${others.map(([c, t]) => `<small class="mini" style="display:block;margin-top:8px">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}</div>
+${owners ? `<div class="chips tabs" style="margin-bottom:4px">${owners.map(o => `<button class="${accOwner == o ? 'on' : ''}" data-o="${esc(o)}" onclick="accOwner=this.dataset.o;render()">${o == '' ? 'Todas' : o == '~' ? 'Del hogar' : esc(o)}</button>`).join('')}</div>` : ''}
+${accs.length ? groups.filter(g => g[2].length).map(([t, ic, l]) => `<div class="ghd"><span><i class="icon-${ic}"></i> ${t}</span><b class="mut">${gsum(l)}</b></div><div class="card agrp">${l.slice().sort((x, y) => x.name.localeCompare(y.name)).map(accRow).join('')}</div>`).join('') : '<div class="card"><p class="empty" style="margin:0">Aún no tienes cuentas. Agrega la primera: efectivo, banco o tarjeta.</p></div>'}
+<div class="seg" style="margin-top:4px"><button class="p" onclick="openAccForm()"><i class="icon-plus"></i> Nueva cuenta</button>${accs.length >= 2 ? `<button onclick="openTransferForm()"><i class="icon-arrow-left-right"></i> Transferir</button>` : ''}</div>
+<details class="card" style="margin-top:14px"${asOf ? ' open' : ''}><summary>Ver saldos a otra fecha ›</summary><div class="add" style="margin-top:8px"><input type="date" value="${esc(asOf || '')}" onchange="F.accAsOf=this.value;render()">${asOf ? `<button onclick="F.accAsOf='';render()">Hoy</button>` : ''}</div></details>`;
 }
-function accCard(a) {
-  const asOf = F.accAsOf || undefined, bal = acctBalance(a, asOf), card = isCard(a), loan = isLoan(a), debtA = card || loan, e = earm(a), cy = asOf ? null : cardCycle(a), ly = asOf ? null : loanCycle(a);
+// Transferir desde una cuenta
+function trFrom(id) { openTransferForm(null, null, ''); trform.from = id; if (trform.to == id) trform.to = (accs.find(x => x.id != id) || {}).id; trform.note = ''; drawTransferForm(); }
+// Estado corto de una cuenta (para la fila y la hoja)
+function accStatus(a, short) {
+  const asOf = F.accAsOf || undefined, cy = asOf ? null : cardCycle(a), ly = asOf ? null : loanCycle(a), out = [];
+  if (cy) { const dl = dueLabel(cy.pay); out.push(cy.debtAtCut <= 0 ? pill('Sin saldo al corte', 'in') : cy.left <= 0 ? pill('Corte pagado ✓', 'in') : pill(short ? `Pagar ${dl.t.toLowerCase()}` : `Pagar ${money(cy.left, a.currency)} · ${dl.t.toLowerCase()}`, dl.k || 'warn')); }
+  if (ly && !ly.done) { const dl = dueLabel(ly.due); out.push(ly.missed ? pill('Cuota atrasada', 'out') : ly.paid ? pill('Cuota del mes pagada ✓', 'in') : pill('Cuota ' + dl.t.toLowerCase(), dl.k || '')); }
+  return { cy, ly, pills: out };
+}
+function accRow(a) {
+  const asOf = F.accAsOf || undefined, bal = acctBalance(a, asOf), loan = isLoan(a), debtA = isDebtAcc(a), st = accStatus(a, true), e = earm(a);
+  const sub = loan ? esc(a.lender || a.loanKind || 'Préstamo') : esc(a.type) + (a.currency != 'DOP' ? ' · ' + a.currency : '') + (a.owner ? ' · ' + esc(a.owner) : '');
+  return `<div class="arow" role="button" onclick="openAccSheet('${a.id}')">${circ(a.name, loan ? loanIcon(a.loanKind) : acctIcon(a.type))}
+<div><b>${esc(a.name)}</b><small>${st.pills.length ? st.pills.join(' ') : sub}${e > 0 ? ' · ' + pill('Metas ' + money(e)) : ''}</small></div>
+<div class="bal"><b class="num ${bal < 0 ? 'out' : ''}">${money(debtA ? Math.abs(bal) : bal, a.currency)}</b><small class="mut">${debtA ? (bal < 0 ? 'debes' : bal > 0 ? 'a favor' : 'al día') : 'disponible'}</small></div></div>`;
+}
+// Hoja de una cuenta: saldo, estado, acciones y últimos movimientos
+function openAccSheet(id) {
+  const a = accs.find(x => x.id == id); if (!a) return;
+  const bal = acctBalance(a), card = isCard(a), loan = isLoan(a), debtA = card || loan, st = accStatus(a), e = earm(a), cy = st.cy, ly = st.ly;
   const early = txs.filter(x => (x.accId == a.id || x.accIdTo == a.id) && a.openDate && x.d < a.openDate).length;
-  const meta = [];
-  if (a.owner) meta.push(pill(a.owner));
-  if (a.note) meta.push(pill(a.note));
-  if (e > 0) meta.push(pill('Metas ' + money(e)), pill('Libre ' + money(bal - e), 'in'));
+  const meta = [...st.pills];
   if (card && a.cutDay && a.payDay) meta.push(pill(`Corte día ${a.cutDay} · pago día ${a.payDay}`));
-  if (cy) { const dl = dueLabel(cy.pay); meta.push(cy.debtAtCut <= 0 ? pill('Sin saldo al corte', 'in') : cy.left <= 0 ? pill('Corte pagado ✓', 'in') : pill(`Pagar ${money(cy.left, a.currency)} · ${dl.t.toLowerCase()}`, dl.k || 'warn')); }
-  if (ly && !ly.done) { const dl = dueLabel(ly.due); meta.push(pill('Cuota ' + money(ly.payment, a.currency)), ly.missed ? pill('Cuota atrasada', 'out') : ly.paid ? pill('Cuota del mes pagada ✓', 'in') : pill(dl.t, dl.k || '')); }
-  const acts = loan ? `${ly && !ly.done ? `<button class="p" onclick="openLoanPay('${a.id}')">Pagar cuota</button>` : ''}<button onclick="debtTab='loans';go('debts')">Ver préstamo</button>`
-    : `<button onclick="openAdj('${a.id}')">Ajustar saldo</button><button onclick="F={acc:'${a.id}'};go('hist')">Movimientos</button>${card && cy && cy.left > 0 ? `<button class="p" onclick="openTransferForm(null,'${a.id}',${cy.left})">Pagar</button>` : ''}`;
-  return `<div class="card acc" onclick="openAccForm('${a.id}')"><div class="head">${circ(a.name, loan ? loanIcon(a.loanKind) : acctIcon(a.type))}
-<div><b>${esc(a.name)}</b><small class="mut">${loan ? esc(a.lender || a.loanKind || 'Préstamo') : esc(a.type)} · ${a.currency}</small></div>
-<div class="bal"><b class="${bal < 0 ? 'out' : ''}">${money(debtA ? Math.abs(bal) : bal, a.currency)}</b><small class="mut">${debtA ? (bal < 0 ? 'debes' : bal > 0 ? 'a favor' : 'al día') : 'disponible'}</small></div></div>
-${meta.length ? `<div class="meta">${meta.join('')}</div>` : ''}
-${early ? `<small class="warnline" style="margin-top:8px">⚠ ${early} movimiento${early > 1 ? 's' : ''} con fecha anterior a la apertura (${fdate(a.openDate, 1)}) no cuenta${early > 1 ? 'n' : ''} en el saldo.</small>` : ''}
-<div class="acts" onclick="event.stopPropagation()">${acts}</div></div>`;
+  if (loan && a.payment) meta.push(pill('Cuota ' + money(a.payment, a.currency)));
+  if (e > 0) meta.push(pill('Metas ' + money(e)), pill('Libre ' + money(bal - e), 'in'));
+  if (a.note) meta.push(pill(a.note));
+  const B = (ic, l, f, p) => `<button type="button" class="${p ? 'p' : ''}" onclick="${f}"><i class="icon-${ic}"></i>${l}</button>`;
+  const acts = loan ? [ly && !ly.done ? B('hand-coins', 'Pagar cuota', `openLoanPay('${a.id}')`, 1) : '', B('list', 'Tabla de pagos', `openSchedule('${a.id}')`), B('arrow-left-right', 'Abonar', `openTransferForm(null,'${a.id}','');trform.note='Abono a capital';drawTransferForm()`), B('pencil', 'Editar', `openAccForm('${a.id}')`)]
+    : [card && cy && cy.left > 0 ? B('credit-card', 'Pagar ' + money(cy.left, a.currency), `openTransferForm(null,'${a.id}',${cy.left})`, 1) : '', B('list', 'Movimientos', `F={acc:'${a.id}'};go('hist')`), accs.length > 1 ? B('arrow-left-right', 'Transferir', card ? `openTransferForm(null,'${a.id}','')` : `trFrom('${a.id}')`) : '', B('sliders', 'Ajustar saldo', `openAdj('${a.id}')`), B('pencil', 'Editar', `openAccForm('${a.id}')`)];
+  const last = latestTxs(4, x => x.accId == a.id || x.accIdTo == a.id);
+  dlg.innerHTML = `<div class="sheethd">${circ(a.name, loan ? loanIcon(a.loanKind) : acctIcon(a.type))}<div><b>${esc(a.name)}</b><small>${loan ? esc(a.lender || a.loanKind || 'Préstamo') : esc(a.type)} · ${a.currency}${a.owner ? ' · de ' + esc(a.owner) : ''}</small></div><button class="iconbtn" aria-label="Cerrar" onclick="dlg.close()"><i class="icon-x"></i></button></div>
+<div style="margin:14px 0 8px"><small class="mut">${debtA ? (bal < 0 ? 'Debes' : 'Saldo') : 'Disponible'}</small><div class="bigbal ${bal < 0 ? 'out' : ''}">${money(debtA ? Math.abs(bal) : bal, a.currency)}</div></div>
+${meta.length ? `<div class="meta" style="margin-bottom:12px">${meta.join('')}</div>` : ''}
+${early ? `<small class="warnline" style="margin-bottom:10px">⚠ ${early} movimiento${early > 1 ? 's' : ''} con fecha anterior a la apertura (${fdate(a.openDate, 1)}) no cuenta${early > 1 ? 'n' : ''} en el saldo.</small>` : ''}
+<div class="actgrid">${acts.join('')}</div>
+${last.length ? `<h3 class="grph" style="margin-top:18px">Últimos movimientos</h3>${last.map(x => histRow(x)).join('')}` : ''}`;
+  dlgShow();
 }
 
 // ============ Presupuesto ============
@@ -238,9 +278,8 @@ function renderBud(app) {
 <div><b>${esc(n)}${roll ? ' <i class="icon-repeat" title="Se arrastra" style="font-size:13px;color:var(--brand)"></i>' : ''}</b><small>${lim ? money(spent) + ' de ' + money(lim) : money(spent) + ' · sin tope'}${k ? ` · ${k > 0 ? 'incluye ' + money(k) + ' que sobró' : money(-k) + ' de menos (te pasaste antes)'}` : ''}${(b.catOverrides || {})[n] != null ? ' · tope solo de este mes' : ''}</small></div>
 ${s2 ? `<b class="num" style="color:${barCol(s2.level)}">${s2.pct}%</b><div style="flex-basis:100%;padding-left:54px">${bar(s2.pct, barCol(s2.level))}</div>` : `<i class="icon-chevron-right mut"></i>`}</div>`;
   };
-  app.innerHTML = `${head('Presupuesto')}
-<div class="card"><div class="add" style="align-items:center"><button class="iconbtn" aria-label="Mes anterior" onclick="budYm=addMonths(budYm,-1);render()"><i class="icon-chevron-left"></i></button>
-<b style="flex:1;text-align:center;text-transform:capitalize">${mesTxt}</b><button class="iconbtn" aria-label="Mes siguiente" onclick="budYm=addMonths(budYm,1);render()"><i class="icon-chevron-right"></i></button></div></div>
+  app.innerHTML = `${head('Presupuesto', true)}
+${monthNav(ym, 'budYm')}
 <div class="card"><h2>Total del mes</h2>
 ${st ? `<div style="display:flex;justify-content:space-between;margin-bottom:6px"><span class="num">${money(spentTotal)} de ${money(b.total)}</span><b style="color:${barCol(st.level)}">${st.pct}%</b></div>${bar(st.pct, barCol(st.level))}
 ${st.level == 'out' ? '<p class="out" style="margin:8px 0 0;font-size:13px">Te pasaste del presupuesto de este mes.</p>' : st.level == 'yellow' ? '<p class="warn" style="margin:8px 0 0;font-size:13px">Vas llegando al límite (80% o más).</p>' : ''}`
@@ -278,20 +317,21 @@ function svBudCat(e) {
 
 // ============ Más ============
 function renderMore(app) {
-  const pend = pendingRecurring().length, st = settlements(), ds = debtSummary();
-  const tile = (t, ic, title, sub, badge) => `<button class="tile" onclick="${t.includes('(') ? t : `go('${t}')`}"><div class="circ tint" style="--c:var(--brand)"><i class="icon-${ic}"></i>${badge ? `<span class="badge">${badge}</span>` : ''}</div><div><b>${title}</b><br><small>${sub}</small></div></button>`;
-  app.innerHTML = `${head('Más')}<div class="card crest-card"><img src="icons/escudo.webp" alt="${esc(MARCA.nombre ? 'Escudo ' + MARCA.nombre : 'Escudo')}" loading="lazy"></div>
-<h3 class="grph">Planear</h3><div class="tiles">
-${tile('plan', 'calendar-days', 'Planificar', 'Te alcanza, proyección y calendario')}
-${tile('rec', 'repeat', 'Recurrentes', pend ? pend + ' por confirmar' : 'Pagos, ingresos y aportes fijos', pend)}
-${tile('goal', 'target', 'Metas', goals.length ? goals.length + ' meta' + (goals.length > 1 ? 's' : '') : 'Ahorra para algo')}
-${tile('rep', 'bar-chart-3', 'Reportes', 'Gráficas y patrimonio')}</div>
-<h3 class="grph">Deudas y hogar</h3><div class="tiles">
-${tile('debts', 'hand-coins', 'Deudas y bienes', ds.total ? 'Debes ' + money(ds.total) : ds.owed ? 'Te deben ' + money(ds.owed) : 'Préstamos, personas y bienes')}
-${tile('shared', 'users', 'Cuentas claras', st.length ? esc(st[0].from) + ' debe ' + money(st[0].amount) : 'Gastos compartidos al día')}</div>
-<h3 class="grph">Herramientas y ajustes</h3><div class="tiles">
-${tile("toolView='';go('tools')", 'wrench', 'Herramientas', 'Suscripciones, importar, reglas…')}
-${tile("setSub='';go('set')", 'settings', 'Ajustes', 'Nube, seguridad, apariencia, datos')}</div>`;
+  const pend = pendingRecurring().length, st = settlements(), ds = debtSummary(), nb = (MARCA && MARCA.nombre) || '';
+  const tile = (t, ic, title, sub, badge, c) => `<button class="tile" onclick="${t.includes('(') ? t : `go('${t}')`}"><div class="circ tint" style="--c:var(--${c || 'brand'})"><i class="icon-${ic}"></i>${badge ? `<span class="badge">${badge}</span>` : ''}</div><div><b>${title}</b>${sub ? `<span class="tsub">${sub}</span>` : ''}</div></button>`;
+  app.innerHTML = `${head('Más')}
+<div class="mhead"><img src="icons/escudo.webp" alt="${esc(nb ? 'Escudo ' + nb : 'Escudo')}" loading="lazy"><div><b>${nb ? 'Familia ' + esc(nb) : 'Mis finanzas'}</b><small>Mis finanzas · versión ${APP_VERSION}</small></div></div>
+<h3 class="grph">Tu dinero</h3><div class="tiles">
+${tile('bud', 'pie-chart', 'Presupuesto', '', 0, 'brand')}
+${tile('plan', 'calendar-days', 'Planificar', '', 0, 'blue')}
+${tile('rec', 'repeat', 'Recurrentes', pend ? pend + ' por confirmar' : '', pend, 'teal')}
+${tile('goal', 'target', 'Metas', goals.length ? goals.length + ' activa' + (goals.length > 1 ? 's' : '') : '', 0, 'pink')}
+${tile('rep', 'bar-chart-3', 'Reportes', '', 0, 'purple')}
+${tile("debtTab='loans';go('debts')", 'hand-coins', 'Deudas y bienes', ds.total ? money(ds.total) : '', 0, 'yellow')}</div>
+<h3 class="grph">Hogar y herramientas</h3><div class="tiles">
+${tile('shared', 'users', 'Cuentas claras', st.length ? esc(st[0].from) + ' debe' : '', 0, 'blue')}
+${tile("toolView='';go('tools')", 'wrench', 'Herramientas', '', 0, 'teal')}
+${tile("setSub='';go('set')", 'settings', 'Ajustes', '', 0, 'purple')}</div>`;
 }
 
 // ============ Recurrentes ============
@@ -329,7 +369,7 @@ ${goals.length ? goals.map(g => {
 <div style="display:flex;justify-content:space-between;margin:12px 0 6px"><span class="num">${money(p.saved)} de ${money(g.target)}</span><b style="color:var(--${col})">${p.pct}%</b></div>${bar(p.pct, `var(--${col})`)}
 <p class="mini" style="margin:8px 0 0">${p.remaining > 0 ? 'Faltan ' + money(p.remaining) : '¡Meta alcanzada! 🎉'}${proj && proj.monthsLeft > 0 ? ` · al ritmo de ~${money(proj.perMonth)}/mes, en ~${proj.monthsLeft} ${proj.monthsLeft == 1 ? 'mes' : 'meses'}` : ''}${rr.length ? ' · ' + rr.map(r => `aporte ${freqLabel[r.freq].toLowerCase()} de ${money(r.amount, r.currency)}`).join(', ') : ''}</p>
 ${m.length ? `<div style="margin-top:8px">${m.map(x => histRow(x)).join('')}</div>` : ''}
-<div class="seg sm" style="margin-top:10px"><button class="p" onclick="openContribForm('${g.id}')"><i class="icon-plus"></i> Mover dinero</button><button onclick="openGoalSim('${g.id}')"><i class="icon-sparkles"></i> Simular</button><button onclick="openRecForm(null,{t:'g',goalId:'${g.id}',freq:'quincenal'})"><i class="icon-repeat"></i> Automático</button></div></div>`;
+<div class="seg sm" style="margin-top:10px"><button class="p" onclick="openContribForm('${g.id}')"><i class="icon-plus"></i> Aportar</button><button onclick="openGoalSim('${g.id}')"><i class="icon-sparkles"></i> Simular</button><button onclick="openRecForm(null,{t:'g',goalId:'${g.id}',freq:'quincenal'})"><i class="icon-repeat"></i> Automático</button></div></div>`;
   }).join('') : '<p class="empty">Aún no tienes metas. Crea la primera.</p>'}
 <button class="p" style="width:100%" onclick="openGoalForm()"><i class="icon-plus"></i> Nueva meta</button>
 ${(() => {
@@ -398,7 +438,7 @@ ${cloudOn() ? '' : `<label style="margin-top:10px">Este teléfono es de (se elig
     monedas: () => `<div class="card"><p class="mini" style="margin:0 0 8px">La tasa de referencia se usa para convertir tus saldos en otras monedas al patrimonio, y como sugerencia en los formularios.</p>
 ${cfg.cur.map(c => `<div class="row"><div><b>${c}</b><small>Última tasa usada: ${rateOf(c) && rateOf(c) != refRate(c) ? rateOf(c) : '—'}</small></div><input type="number" inputmode="decimal" step="0.0001" min="0" style="width:120px" placeholder="1 ${c} = ? DOP" value="${(cfg.rates || {})[c] || ''}" onchange="setRefRate('${c}',this.value)"><button class="d" aria-label="Quitar ${c}" onclick="rm('cur','${c}')"><i class="icon-x"></i></button></div>`).join('')}
 <div class="add" style="margin-top:8px"><input id="a-cur" placeholder="Código de 3 letras, ej: CAD" maxlength="3" autocapitalize="characters" onkeydown="if(event.key=='Enter')ad('cur')"><button class="p" onclick="ad('cur')">Agregar</button></div></div>`,
-    datos: () => `<div class="card"><h2><i class="icon-download"></i> Respaldo y Excel</h2><p class="mini" style="margin:0 0 8px">Guarda una copia de todos tus datos, o exporta los ingresos y egresos a Excel (según los filtros del Historial).</p>
+    datos: () => `<div class="card"><h2><i class="icon-download"></i> Respaldo y Excel</h2><p class="mini" style="margin:0 0 8px">Guarda una copia de todos tus datos, o exporta los ingresos y egresos a Excel (según los filtros de Movimientos).</p>
 <div class="add" style="flex-wrap:wrap"><button class="p" onclick="bk()">Descargar respaldo</button><button onclick="cp()">Copiar respaldo</button><button onclick="xl()">Excel</button></div>
 <details style="margin-top:10px"><summary>Importar un respaldo ›</summary>
 <label style="margin-top:8px">Archivo<input type="file" accept=".json,application/json,text/plain" onchange="fi(this)"></label>

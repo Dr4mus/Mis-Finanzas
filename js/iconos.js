@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['iconos.js'] = '9.0.0';
+(window.__V = window.__V || {})['iconos.js'] = '10.0.0';
 /* Mis finanzas — Temas de íconos. Cada tema tiene un equivalente para TODOS los íconos de la app
    (lo revisa herramientas/temas_iconos.py). Lineal viene dentro de css/app.css; los demás se cargan
    solo si los eliges (css/iconos-<tema>.css). Todo se guarda solo en este teléfono, como la paleta. */
@@ -15,7 +15,9 @@ const icGet = (k, d) => { try { const v = localStorage.getItem(k); return v == n
 const icSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) { } };
 let iconTheme = ICON_THEMES[icGet('fin_icons', 'lineal')] ? icGet('fin_icons', 'lineal') : 'lineal';
 let iconColor = icGet('fin_icolor', 'normal') == 'degradado' ? 'degradado' : 'normal';
-let iconMotion = icGet('fin_imotion', '1') != '0';
+// Movimiento: 'live' = siempre (cada ícono se mueve a su manera, de vez en cuando), 'tap' = solo al tocar y al cambiar de pantalla, 'off' = quietos
+const MOTION = { live: 'Siempre', tap: 'Al tocar', off: 'Quietos' };
+let iconMotion = (() => { const v = icGet('fin_imov', ''); return MOTION[v] ? v : icGet('fin_imotion', '') == '0' ? 'off' : 'live'; })();
 
 const appVer = () => (document.querySelector('meta[name="app-version"]') || {}).content || '';
 // Carga el CSS de un tema (una sola vez). Resuelve true si quedó listo.
@@ -33,7 +35,8 @@ function applyIcons() {
   const c = document.documentElement.classList;
   Object.keys(ICON_THEMES).forEach(t => c.toggle('ic-' + t, t == iconTheme));
   c.toggle('ic-grad', iconColor == 'degradado');
-  c.toggle('ic-anim', iconMotion);
+  c.toggle('ic-anim', iconMotion != 'off');
+  c.toggle('ic-live', iconMotion == 'live');
 }
 async function setIconTheme(t) {
   if (!ICON_THEMES[t] || t == iconTheme) return;
@@ -42,7 +45,7 @@ async function setIconTheme(t) {
   toast('Íconos: ' + ICON_THEMES[t].name, { kind: 'ok' });
 }
 function setIconColor(v) { iconColor = v == 'degradado' ? 'degradado' : 'normal'; icSet('fin_icolor', iconColor); applyIcons(); render(); }
-function setIconMotion(on) { iconMotion = !!on; icSet('fin_imotion', on ? '1' : '0'); applyIcons(); render(); }
+function setIconMotion(v) { iconMotion = MOTION[v] ? v : v === true ? 'live' : v === false ? 'off' : 'live'; icSet('fin_imov', iconMotion); applyIcons(); render(); }
 
 function iconThemeHTML() {
   Object.keys(ICON_THEMES).forEach(t => loadIconCss(t).then(ok => { if (!ok) { const b = document.querySelector(`.icopt[data-t="${t}"]`); if (b) b.classList.add('nocss'); } }));
@@ -52,7 +55,9 @@ function iconThemeHTML() {
 <small class="mut" style="display:block;margin:12px 0 6px">Color</small>
 <div class="seg sm"><button type="button" class="${iconColor == 'normal' ? 'on' : ''}" onclick="setIconColor('normal')"><span class="circ tint mini-circ" style="--c:var(--blue)"><i class="icon-wallet"></i></span> Normal</button>
 <button type="button" class="icgrad-prev ${iconColor == 'degradado' ? 'on' : ''}" onclick="setIconColor('degradado')"><span class="circ tint mini-circ" style="--c:var(--blue)"><i class="icon-wallet"></i></span> Degradado</button></div>
-<label class="toggle" style="margin-top:12px"><input type="checkbox" ${iconMotion ? 'checked' : ''} onchange="setIconMotion(this.checked)"> Íconos con movimiento</label>
-<p class="mini" style="margin:4px 0 0">Saltan al cambiar de pantalla y al tocarlos; la campana suena cuando hay algo pendiente. Si tu teléfono tiene activado “Reducir movimiento”, no se mueven.</p></div>`;
+<small class="mut" style="display:block;margin:14px 0 6px">Movimiento</small>
+<div class="seg sm">${Object.entries(MOTION).map(([k, l]) => `<button type="button" class="${iconMotion == k ? 'on' : ''}" onclick="setIconMotion('${k}')">${l}</button>`).join('')}</div>
+<div class="mvdemo" aria-hidden="true">${['bell', 'wallet', 'heart-pulse', 'sparkles', 'chart-line', 'car', 'refresh'].map(i => `<i class="icon-${i}"></i>`).join('')}</div>
+<p class="mini" style="margin:6px 0 0">${iconMotion == 'live' ? 'Cada ícono se mueve a su manera de vez en cuando: la campana suena, la cartera brinca, el corazón late.' : iconMotion == 'tap' ? 'Se mueven solo al tocarlos y al cambiar de pantalla.' : 'Los íconos no se mueven.'} Si tu teléfono tiene activado “Reducir movimiento”, no se mueven.</p></div>`;
 }
 applyIcons();

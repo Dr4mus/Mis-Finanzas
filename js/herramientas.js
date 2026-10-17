@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['herramientas.js'] = '9.0.0';
+(window.__V = window.__V || {})['herramientas.js'] = '10.0.0';
 /* Mis finanzas — Herramientas: suscripciones detectadas, presupuesto sugerido, simulador de metas,
    lo mío / lo tuyo / lo nuestro, pegar alerta del banco, importar estado de cuenta, reglas de categoría,
    etiquetas y eventos, y cierre de mes. */
@@ -247,7 +247,7 @@ function importRows() {
     if (!a) continue;
     const desc = c.desc >= 0 ? String(r[c.desc]).trim() : '', t = a > 0 ? 'i' : 'e', amt = Math.abs(a), rule = matchRule(desc, t);
     const dup = txs.some(x => (x.t == 'i' || x.t == 'e') && x.accId == acc.id && Math.abs((x.aa ?? x.a) - amt) < 0.01 && Math.abs(daysBetween(x.d, d)) <= 2);
-    out.push({ d, desc, t, amt, c: rule ? rule.c : (t == 'e' ? 'Otros' : 'Otros'), sub: rule && rule.sub ? rule.sub : desc.slice(0, 40), dup, on: !dup });
+    out.push({ d, desc, t, amt, c: rule ? rule.c : 'Otros', sub: rule && rule.sub ? rule.sub : desc.slice(0, 40), dup, on: !dup, rule: !!rule });
   }
   return out;
 }
@@ -259,7 +259,7 @@ function drawImport() {
 <details${L.length ? '' : ' open'}><summary>Columnas detectadas ›</summary><div class="two">${colSel('d', 'Fecha')}${colSel('desc', 'Descripción')}</div><div class="two">${colSel('amt', 'Monto (+/−)')}${colSel('deb', 'Débito')}</div>${colSel('cred', 'Crédito')}</details>
 <p class="mini" style="margin:0">${L.length} movimientos leídos · ${L.filter(x => x.dup).length} parecen repetidos (desmarcados) · se importarán <b>${n}</b>.</p>
 <div class="implist">${L.slice(0, 300).map((x, i) => `<label class="toggle irow${x.dup ? ' dup' : ''}"><input type="checkbox" ${x.on ? 'checked' : ''} onchange="imp.list[${i}].on=this.checked"><span><b>${fdate(x.d, 1)} · ${esc(x.desc || '(sin descripción)')}</b><small>${esc(x.c)}${x.dup ? ' · ya lo tienes' : ''}</small></span><b class="num ${x.t == 'i' ? 'in' : 'out'}">${x.t == 'i' ? '+' : '−'}${money(x.amt, acc.currency)}</b></label>`).join('')}</div>
-<p class="mini" style="margin:0">Los que no coinciden con una regla quedan en “Otros”; puedes cambiarlos después en Historial.</p>
+<p class="mini" style="margin:0">Los que no coinciden con una regla quedan en “Otros”; te quedan en <b>Inicio → Por revisar</b> para confirmarlos en un toque.</p>
 <div class="seg"><button type="button" onclick="dlg.close()">Cancelar</button><button class="p">Importar ${n}</button></div></form>`;
   dlgShow();
 }
@@ -267,8 +267,9 @@ function doImport(e) {
   e.preventDefault(); const I = imp, acc = accs.find(a => a.id == I.accId), L = (I.list || []).filter(x => x.on);
   if (!L.length) return fail('No hay movimientos marcados.');
   const r = acc.currency == 'DOP' ? 1 : rateOf(acc.currency) || 1, me = defaultWho();
-  L.forEach(x => { ensureCat(x.c, x.t, 'tag'); saveTx({ t: x.t, d: x.d, c: x.c, sub: x.sub, w: me, accId: acc.id, a: x.amt, cu: acc.currency, r, v: round2(x.amt * r), aa: x.amt, n: 'Importado', tags: [] }, { noRender: true }); });
-  imp = null; dlg.close(); render(); toast(`Importados ${L.length} movimientos`, { kind: 'ok' }); return false;
+  L.forEach(x => { ensureCat(x.c, x.t, 'tag'); saveTx({ t: x.t, d: x.d, c: x.c, sub: x.sub, w: me, accId: acc.id, a: x.amt, cu: acc.currency, r, v: round2(x.amt * r), aa: x.amt, n: 'Importado', tags: [], ...(x.rule ? {} : { rev: 1 }) }, { noRender: true }); });
+  const nr = L.filter(x => !x.rule).length;
+  imp = null; dlg.close(); render(); toast(`Importados ${L.length} movimientos` + (nr ? ` · ${nr} por revisar en Inicio` : ''), { kind: 'ok', ...(nr ? { action: 'Revisar', onAction: openReview } : {}) }); return false;
 }
 
 // ============ etiquetas y eventos ============
@@ -323,4 +324,73 @@ function closeAlert() {
   if (+td.slice(8, 10) > 10 || (cfg.closed || {})[prev] || !accs.some(a => a.openDate <= prev + '-01')) return '';
   try { if (localStorage.getItem('fin_close_snooze') == prev) return ''; } catch (e) { }
   return `<div class="alert bka">${circ('cierre', 'circle-check')}<div><b>Haz el cierre de ${ymLabel(prev)}</b><small>Compara tus saldos con los del banco (2 minutos).</small></div><div class="acts2"><button onclick="try{localStorage.setItem('fin_close_snooze','${prev}')}catch(e){};render()">Luego</button><button class="p" onclick="closeYm='${prev}';toolView='close';go('tools')">Hacer cierre</button></div></div>`;
+}
+
+// ============ por revisar (lo importado sin regla) ============
+// Cada movimiento importado sin regla queda marcado (rev) hasta que confirmes su categoría.
+const revList = () => txs.filter(x => x.rev && (x.t == 'e' || x.t == 'i')).sort((a, b) => b.d.localeCompare(a.d));
+function reviewCard() {
+  const n = revList().length; if (!n) return '';
+  return `<div class="card revc" role="button" onclick="openReview()">${circ('revisar', 'file-up')}<div><b>${n} movimiento${n > 1 ? 's' : ''} por revisar</b><small>Importados del banco: confirma su categoría en un toque</small></div><i class="icon-chevron-right mut"></i></div>`;
+}
+function openReview() {
+  const L = revList();
+  if (!L.length) { if (dlg.open) dlg.close(); render(); return toast('Todo revisado ✓', { kind: 'ok' }); }
+  const top = t => { const c = {}; txs.filter(x => x.t == t && !x.rev).forEach(x => c[x.c] = (c[x.c] || 0) + 1); return cfg.cats.filter(x => x.t == t).map(x => x.n).sort((a, b) => (c[b] || 0) - (c[a] || 0)); };
+  const TE = top('e'), TI = top('i');
+  dlg.innerHTML = `<h2>Por revisar <span class="pill">${L.length}</span></h2>
+<p class="mini" style="margin:0 0 6px">Toca la categoría correcta. Si el comercio se repite, los demás iguales se cambian solos y puedes crear una regla.</p>
+${L.slice(0, 40).map(x => { const T = x.t == 'e' ? TE : TI, cs = [x.c, ...T.filter(c => c != x.c)].slice(0, 6); return `<div class="trow"><div class="row" style="border:0">${circ(x.c, icoFor(x.c, x.t))}<div><b>${esc(x.sub || x.c)}</b><small>${fdate(x.d)} · ${esc((accs.find(a => a.id == x.accId) || {}).name || '')}</small></div><b class="num ${x.t == 'i' ? 'in' : 'out'}">${x.t == 'i' ? '+' : '−'}${money(x.v)}</b></div>
+<div class="chips" style="padding-left:54px">${cs.map(c => `<button type="button" class="${c == x.c ? 'on' : ''}" data-id="${x.id}" data-c="${esc(c)}" onclick="revSet(this.dataset.id,this.dataset.c)">${c == x.c ? '✓ ' : ''}${esc(c)}</button>`).join('')}<button type="button" data-id="${x.id}" onclick="dlg.close();openForm(this.dataset.id)">Otra…</button></div></div>`; }).join('')}
+${L.length > 40 ? `<p class="mini">Y ${L.length - 40} más.</p>` : ''}
+<div class="seg" style="margin-top:6px"><button type="button" onclick="dlg.close();render()">Cerrar</button><button type="button" class="p" onclick="revAll()">Todo está bien</button></div>`;
+  dlgShow();
+}
+function revSet(id, c) {
+  const x = txs.find(t => t.id == id); if (!x) return;
+  const key = norm(x.sub), same = key ? revList().filter(y => y.id != id && y.t == x.t && norm(y.sub) == key) : [];
+  const fix = y => { const { rev, ...o } = y; return { ...o, c }; };
+  bulkTxs([x, ...same].map(fix));
+  openReview(); // primero se redibuja la hoja; luego el aviso (si no, el aviso se borra con la hoja)
+  if (key && c != x.c && !matchRule(x.sub, x.t)) toast(`¿Siempre “${x.sub}” → ${c}?`, { action: 'Crear regla', ms: 8000, onAction: () => { const cf = deep(cfg); cf.rules = [...(cf.rules || []), { id: uid(), m: x.sub.trim().toLowerCase().slice(0, 40), t: x.t, c, sub: '' }]; saveCfg(cf); toast('Regla creada', { kind: 'ok' }); } });
+  else if (same.length) toast(`También ${same.length} más de “${x.sub}”`, { kind: 'ok' });
+}
+function revAll() { const L = revList(); bulkTxs(L.map(y => { const { rev, ...o } = y; return o; })); dlg.close(); render(); toast(`${L.length} revisados ✓`, { kind: 'ok' }); }
+
+// Valor para poner dentro de onclick="…" sin romper el HTML
+const jsAttr = v => JSON.stringify(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '\\u003c');
+// ============ “Para ti”: lo más importante de tus números, en frases cortas ============
+function insights() {
+  const td = today(), ym = td.slice(0, 7), day = +td.slice(8, 10), out = [], mes = m => ymLabel(m).split(' ')[0];
+  const E = txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), spent = E.reduce((q, x) => q + x.v, 0);
+  const cc = catCompare(ym);
+  let hot = null;
+  if (cc && cc.avgTot > 0 && day >= 5) {
+    const tp = cc.expTot > 0 ? cc.vTot / cc.expTot : 1;
+    if (tp > 1.15 && cc.vTot - cc.expTot > 1000) out.push({ p: 90, ic: 'gauge', c: 'out', t: `Vas ${Math.round((tp - 1) * 100)}% por encima de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura del mes sueles llevar ${money(cc.expTot)}.`, go: "repTab='cat';go('rep')" });
+    else if (tp < 0.85 && cc.expTot - cc.vTot > 1000) out.push({ p: 40, ic: 'trending-down', c: 'in', t: `Vas ${Math.round((1 - tp) * 100)}% por debajo de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura sueles llevar ${money(cc.expTot)}. ¡Bien!`, go: "repTab='cat';go('rep')" });
+    hot = cc.rows.filter(r => r.avg > 0 && r.pace > 1.3 && r.v - r.exp > Math.max(500, r.avg * 0.15)).sort((a, b) => (b.v - b.exp) - (a.v - a.exp))[0];
+    if (hot) out.push({ p: 80, ic: icoFor(hot.c, 'e'), c: 'warn', t: `${esc(hot.c)}: ${money(hot.v)} este mes`, s: `A esta altura sueles llevar ${money(hot.exp)} (${money(hot.avg)} en todo el mes).`, go: `F={c:${jsAttr(hot.c)}};pre('mes');go('hist')` });
+  }
+  // pagos de los próximos 7 días
+  const lim = addDays(td, 7), ev = [...calendarEvents(ym), ...calendarEvents(addMonths(ym, 1))].filter(e => e.d > td && e.d <= lim && e.st != 'done' && (e.k == 'e' || e.k == 'pay' || e.k == 'loan' || (e.k == 'debt' && e.dir == 'owe')));
+  if (ev.length) { const tot = ev.reduce((q, e) => q + (e.v ? convert(e.v, e.cu || 'DOP', 'DOP', td) : 0), 0); out.push({ p: 70, ic: 'calendar-days', c: 'blue', t: tot ? `Esta semana pagas ${money(tot)}` : `Esta semana tienes ${ev.length} pago${ev.length > 1 ? 's' : ''}`, s: ev.slice(0, 3).map(e => esc(e.name)).join(', ') + (ev.length > 3 ? ` y ${ev.length - 3} más` : '') + '.', go: "go('plan')" }); }
+  // comercio que más se repite
+  const bySub = {}; E.filter(x => x.sub).forEach(x => { const k = norm(x.sub); (bySub[k] = bySub[k] || { n: 0, v: 0, name: x.sub }).n++; bySub[k].v += x.v; });
+  const fr = Object.values(bySub).filter(b => b.n >= 3).sort((a, b) => b.n - a.n || b.v - a.v)[0];
+  if (fr) out.push({ p: 50, ic: 'repeat', c: 'purple', t: `${esc(fr.name)}: ${fr.n} veces este mes`, s: `Suman ${money(fr.v)}.`, go: `F={q:${jsAttr(fr.name)}};go('hist')` });
+  // la categoría más grande del mes
+  if (!hot && spent > 0) { const g = Object.entries(grp(E, 'c')).sort((a, b) => b[1] - a[1])[0]; if (g) out.push({ p: 30, ic: icoFor(g[0], 'e'), c: 'pink', t: `${esc(g[0])} es tu mayor gasto del mes`, s: `${money(g[1])} · ${Math.round(g[1] / spent * 100)}% de lo que llevas gastado.`, go: "repTab='cat';go('rep')" }); }
+  // cómo cerró el mes pasado
+  const pm = addMonths(ym, -1), pv = monthStats(pm);
+  if (pv.inc > 0 && day <= 12) out.push(pv.net < 0 ? { p: 85, ic: 'alert-triangle', c: 'out', t: `En ${mes(pm)} gastaste más de lo que entró`, s: `Saliste ${money(-pv.net)} abajo. Revisa tus topes en Presupuesto.`, go: "go('bud')" }
+    : { p: 35, ic: 'piggy-bank', c: 'in', t: `En ${mes(pm)} ahorraste ${pv.rate}%`, s: `Entraron ${money(pv.inc)} y salieron ${money(pv.exp)}.`, go: "repYm='" + pm + "';repTab='res';go('rep')" });
+  // meta más cercana
+  const gl = goals.map(g => ({ g, p: goalProgress(g), j: goalProjection(g) })).filter(x => x.p.remaining > 0 && x.j && x.j.monthsLeft > 0).sort((a, b) => a.j.monthsLeft - b.j.monthsLeft)[0];
+  if (gl) out.push({ p: 25, ic: 'target', c: 'teal', t: `“${esc(gl.g.name)}”: llegas en ~${gl.j.monthsLeft} ${gl.j.monthsLeft == 1 ? 'mes' : 'meses'}`, s: `Vas por ${gl.p.pct}% al ritmo de ~${money(gl.j.perMonth)} al mes.`, go: "go('goal')" });
+  return out.sort((a, b) => b.p - a.p).slice(0, 3);
+}
+function insightsCard() {
+  const L = insights(); if (!L.length) return '';
+  return `<div class="card"><h2><i class="icon-sparkles"></i> Para ti</h2>${L.map(x => `<div class="ins" role="button" onclick="${x.go}"><div class="circ tint" style="--c:var(--${x.c})"><i class="icon-${x.ic}"></i></div><div><b>${x.t}</b><small>${x.s}</small></div><i class="icon-chevron-right"></i></div>`).join('')}</div>`;
 }
