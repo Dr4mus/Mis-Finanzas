@@ -17,6 +17,7 @@
 
 /* ---------- base ---------- */
 *{box-sizing:border-box}html{-webkit-text-size-adjust:100%}
+html,body{overscroll-behavior-y:none} /* sin recargar la app al jalar hacia abajo */
 body{margin:0;background:var(--bg);color:var(--ink);font:400 15px/1.45 Figtree,system-ui,-apple-system,sans-serif;padding-top:env(safe-area-inset-top,0px);-webkit-font-smoothing:antialiased}
 html.locked #app,html.locked nav{visibility:hidden}
 main{max-width:980px;margin:0 auto;padding:12px 16px calc(var(--dock) + 52px + env(safe-area-inset-bottom,0px))}
@@ -153,7 +154,7 @@ nav .add>span:last-child{position:absolute;width:1px;height:1px;overflow:hidden;
 html.wiz nav{display:none}
 
 /* ---------- diálogos y hojas ---------- */
-dialog{border:0;border-radius:24px;background:var(--card);color:var(--ink);width:min(480px,94vw);padding:18px;max-height:90vh;overflow:auto;box-shadow:0 24px 70px #0005}
+dialog{border:0;border-radius:24px;background:var(--card);color:var(--ink);width:min(480px,94vw);padding:18px;max-height:90vh;overflow:auto;overscroll-behavior:contain;box-shadow:0 24px 70px #0005}
 dialog::backdrop{background:color-mix(in srgb,#0b0812 55%,transparent);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
 dialog form{display:grid;gap:12px}dialog h2{font-size:18px;font-weight:800;margin:0 0 2px}
 #ask{width:min(380px,90vw)}#ask p{margin:0 0 6px;line-height:1.5}
@@ -161,7 +162,8 @@ dialog form>*,.two>*,.amount>*,label>*{min-width:0}
 dialog input:not([type=checkbox]):not([type=radio]),dialog select,dialog textarea,.two input,.two select{width:100%}
 @media(max-width:640px){
   #dlg{margin:auto 0 0;width:100%;max-width:100%;max-height:92vh;max-height:92dvh;border-radius:26px 26px 0 0;padding:8px 16px calc(18px + env(safe-area-inset-bottom,0px));animation:sheet .3s cubic-bezier(.2,.9,.25,1)}
-  #dlg::before{content:'';display:block;width:42px;height:5px;border-radius:9px;background:var(--line);margin:0 auto 12px}
+  #dlg::before{content:'';display:block;width:44px;height:5px;border-radius:9px;background:color-mix(in srgb,var(--mut) 45%,transparent);margin:0 auto 12px}
+  #dlg{touch-action:pan-y}
 }
 @keyframes sheet{from{transform:translateY(60px);opacity:.3}to{transform:none;opacity:1}}
 
@@ -175,6 +177,9 @@ dialog .toasts{bottom:24px}
 .toast.err{background:#c62f55!important;color:#fff!important}.toast.ok{background:#16794f!important;color:#fff!important}.toast.err button,.toast.ok button{color:#fff!important}
 @keyframes tin{from{opacity:0;transform:translateY(10px) scale(.98)}to{opacity:1;transform:none}}
 
+.confetti{position:fixed;inset:0;pointer-events:none;z-index:60;overflow:hidden}
+.confetti i{position:absolute;top:-16px;left:var(--x);width:9px;height:14px;border-radius:2px;animation:conf var(--t) cubic-bezier(.25,.6,.4,1) var(--d) forwards}
+@keyframes conf{to{transform:translate(var(--dx),105vh) rotate(var(--r));opacity:.9}}
 /* ---------- Inicio ---------- */
 .hero{position:relative;overflow:hidden;background:radial-gradient(120% 140% at 100% 0%,color-mix(in srgb,#fff 16%,transparent),transparent 55%),linear-gradient(140deg,var(--hero1),var(--hero2));color:#fff;border:0;padding:18px;box-shadow:0 14px 34px color-mix(in srgb,var(--hero1) 30%,transparent)}
 .hero::after{content:'';position:absolute;right:-28px;bottom:-34px;width:170px;height:170px;background:url(../icons/escudo.webp) center/contain no-repeat;opacity:.13;filter:grayscale(1) brightness(1.9);pointer-events:none}
@@ -238,6 +243,7 @@ dialog .toasts{bottom:24px}
 .catgrid button i{font-size:21px}.catgrid button.on{background:var(--brand-soft);color:var(--brand);font-weight:800;box-shadow:inset 0 0 0 1.5px var(--brand)}
 .icogrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:8px;max-height:190px;overflow:auto;background:var(--soft);border-radius:14px;padding:8px}
 .icogrid button{min-height:40px;height:40px;padding:0;display:flex;align-items:center;justify-content:center;border-radius:11px;background:var(--card)}.icogrid button.on{background:var(--brand);color:var(--brand-ink)}
+.gfc{display:grid;gap:3px;margin-top:8px}
 .revtag{display:inline-flex;align-items:center;gap:4px;font-size:11px;font-weight:800;color:var(--brand);background:var(--brand-soft);padding:1px 7px;border-radius:99px;vertical-align:middle;margin-left:4px}
 
 /* ---------- planificar y calendario ---------- */

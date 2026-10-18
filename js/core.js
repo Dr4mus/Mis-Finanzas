@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '10.0.0';
+(window.__V = window.__V || {})['core.js'] = '10.1.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -26,6 +26,7 @@ const addDay = iso => addDays(iso, 1);
 const daysBetween = (a, b) => (new Date(b + 'T00:00:00Z') - new Date(a + 'T00:00:00Z')) / 864e5;
 const now = () => Date.now();
 const maxISO = (a, b) => (a > b ? a : b);
+const minISO = (a, b) => (a < b ? a : b);
 const MES3 = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
 const DIA3 = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
 // "13 oct" (y el año si no es el actual)
@@ -331,7 +332,30 @@ function goalProjection(g) {
   if (perMonth <= 0) return null;
   return { monthsLeft: Math.ceil(p.remaining / perMonth), perMonth: round2(perMonth) };
 }
-const earm = a => goals.filter(g => g.accId == a.id).reduce((t, g) => t + goalProgress(g).saved, 0);
+// Metas activas: las cumplidas o cerradas (g.done = fecha) ya no cuentan ni apartan dinero
+const activeGoals = () => goals.filter(g => !g.done);
+const earm = a => goals.filter(g => g.accId == a.id && !g.done).reduce((t, g) => t + goalProgress(g).saved, 0);
+// ============ plan de aportes de una meta ============
+const PLAN_FREQ = { semanal: { l: 'cada semana', u: 'semana', pm: 52 / 12 }, quincenal: { l: 'cada quincena (1 y 15)', u: 'quincena', pm: 2 }, mensual: { l: 'cada mes', u: 'mes', pm: 1 } };
+// El plan vigente: el aporte automático activo de la meta (Recurrentes) o el plan anotado en la meta
+function goalPlan(g) {
+  const r = recs.find(x => x.t == 'g' && x.goalId == g.id && x.active !== false && PLAN_FREQ[x.freq] && +x.amount > 0);
+  if (r) return { freq: r.freq, day: r.day, amount: +r.amount, rec: r };
+  const p = g.plan; return p && PLAN_FREQ[p.freq] && +p.amount > 0 ? { freq: p.freq, day: p.day, amount: +p.amount } : null;
+}
+// Cuándo se cumple: con el plan (fechas reales de los aportes), con el ritmo que llevas, y lo que hace falta para la fecha objetivo
+function goalForecast(g, plan) {
+  const p = goalProgress(g), td = today(), pl = plan !== undefined ? plan : goalPlan(g), pace = goalProjection(g), out = { p, pl, pace };
+  if (p.remaining <= 0) return { ...out, reached: true };
+  const far = addMonthsISO(td, 12 * 30);
+  const dates = pl ? nextDates({ freq: pl.freq, day: pl.day }, pl.rec ? minISO(recFrom(pl.rec), td) : td, far).filter(d => !pl.rec || !(pl.rec.done || []).includes(d)) : [];
+  if (pl) { out.n = Math.ceil(p.remaining / pl.amount - 1e-9); out.date = dates[out.n - 1] || null; out.perMonth = round2(pl.amount * PLAN_FREQ[pl.freq].pm); }
+  if (g.due && g.due >= td) {
+    if (pl) { const cnt = dates.filter(d => d <= g.due).length; out.cnt = cnt; out.need = cnt ? round2(p.remaining / cnt) : null; out.late = !out.date || out.date > g.due; }
+    else { const m = Math.max(1, Math.ceil(daysBetween(td, g.due) / 30.44)); out.needMonth = round2(p.remaining / m); }
+  }
+  return out;
+}
 const freeBal = (a, d) => round2(acctBalance(a, d) - earm(a));
 // Calcula algo como si un movimiento no existiera (para validar al editar)
 function without(id, fn) { const keep = txs; txs = txs.filter(t => t.id != id); try { return fn(); } finally { txs = keep; } }

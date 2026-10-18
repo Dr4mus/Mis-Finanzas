@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['screens.js'] = '10.0.0';
+(window.__V = window.__V || {})['screens.js'] = '10.1.0';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
@@ -74,7 +74,7 @@ function alertsHTML() {
   const ym = td.slice(0, 7), b = budgetFor(ym), cs = grp(txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), 'c');
   Object.entries(b.cats || {}).filter(([c, l]) => l > 0 && (cs[c] || 0) / l >= 0.8).forEach(([c, l]) => {
     const p = Math.round((cs[c] || 0) / l * 100);
-    out.push(`<div class="alert">${circ(c, icoFor(c, 'e'))}<div><b>${esc(c)}: ${p}% del tope</b><small>${money(cs[c] || 0)} de ${money(l)}</small>${bar(p, barCol(p >= 100 ? 'out' : 'yellow'))}</div></div>`);
+    out.push(`<div class="alert" role="button" style="cursor:pointer" data-c="${esc(c)}" onclick="budYm='${ym}';openBudCat(this.dataset.c)">${circ(c, icoFor(c, 'e'))}<div><b>${esc(c)}: ${p}% del tope</b><small>${money(cs[c] || 0)} de ${money(l)}</small>${bar(p, barCol(p >= 100 ? 'out' : 'yellow'))}</div></div>`);
   });
   out.push(debtAlerts());
   out.push(closeAlert());
@@ -115,7 +115,7 @@ ${approx ? `<small class="hx">* Todo convertido a pesos${nw.missing.length ? ' (
     },
     alertas: () => { const al = alertsHTML(); return al ? `<div class="card"><h2><i class="icon-bell alarm"></i> Pendientes y alertas</h2>${al}</div>` : ''; },
     promedio: () => promedioCard(),
-    metas: () => goals.length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${goals.map(g => { const p = goalProgress(g), c = accentFor(g.name); return `<div style="margin-bottom:12px" role="button" onclick="go('goal')"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:800">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}</small></div>`; }).join('')}</div>` : '',
+    metas: () => activeGoals().length ? `<div class="card"><h2><i class="icon-target"></i> Metas</h2>${activeGoals().map(g => { const fc = goalForecast(g), p = fc.p, c = accentFor(g.name); return `<div style="margin-bottom:12px" role="button" onclick="go('goal')"><div style="display:flex;justify-content:space-between;gap:8px;margin-bottom:5px"><b>${esc(g.name)}</b><span class="num" style="color:var(--${c});font-weight:800">${p.pct}%</span></div>${bar(p.pct, `var(--${c})`)}<small class="mut">${money(p.saved)} de ${money(g.target)}${fc.reached ? ' · ¡lograda! 🎉' : fc.date ? ' · llegas ~' + fdate(fc.date, 1) : fc.pace && fc.pace.monthsLeft ? ' · ~' + fc.pace.monthsLeft + ' meses' : ''}</small></div>`; }).join('')}</div>` : '',
     recientes: () => {
       const recent = latestTxs(5);
       return `<div class="card"><h2><i class="icon-list"></i> Últimos movimientos</h2>${recent.length ? recent.map(x => histRow(x)).join('') + `<button class="link" onclick="go('hist')">Ver todos</button>` : '<p class="empty">Aún no hay movimientos. Toca el botón <b>+</b> de abajo para anotar el primero.</p>'}</div>`;
@@ -289,12 +289,29 @@ ${st.level == 'out' ? '<p class="out" style="margin:8px 0 0;font-size:13px">Te p
 <div class="add" style="margin-top:8px"><label style="flex:1">Solo para ${mesTxt} (opcional)<input type="number" inputmode="decimal" step="0.01" min="0" value="${ov.total ?? ''}" id="bt-mes" placeholder="Usa el base"></label><button style="align-self:flex-end" onclick="setBudgetMonth('${ym}',$('bt-mes').value)">Guardar</button></div>
 ${ov.total != null ? `<button class="link" style="color:var(--out)" onclick="setBudgetMonth('${ym}','')">Quitar excepción de ${mesTxt}</button>` : ''}</details></div>
 <button style="width:100%;margin-bottom:12px" onclick="openSuggest()"><i class="icon-wand-sparkles"></i> Sugerir topes según mis gastos</button>
-<div class="card"><h2>Por categoría</h2><p class="mini" style="margin:0 0 6px">Toca una categoría para ponerle tope o hacer que lo que sobre pase al mes siguiente.</p>
+<div class="card"><h2>Por categoría</h2><p class="mini" style="margin:0 0 6px">Toca una categoría para ver sus movimientos, cambiar el tope o hacer que lo que sobre pase al mes siguiente.</p>
 ${withLim.map(row).join('') || '<p class="mini">Aún no hay gastos ni topes este mes.</p>'}
 ${rest.length ? `<details style="margin-top:6px"><summary>Otras categorías (${rest.length}) ›</summary>${rest.map(row).join('')}</details>` : ''}</div>`;
 }
 let bcf = {};
+// Al tocar una categoría: lo gastado este mes y los movimientos que lo forman
 function openBudCat(n) {
+  const ym = budYm, L = txs.filter(x => x.t == 'e' && x.c == n && x.d.slice(0, 7) == ym).sort((a, b) => (a.d < b.d ? 1 : a.d > b.d ? -1 : (b.cr || 0) - (a.cr || 0)));
+  const b = budgetFor(ym), lim = b.cats[n], spent = round2(L.reduce((q, x) => q + x.v, 0)), st = budgetStatus(spent, lim), k = (b.carry || {})[n], roll = (cfg.rollCats || {})[n];
+  const subs = Object.entries(L.reduce((o, x) => { const s0 = x.sub || 'Sin detalle'; o[s0] = (o[s0] || 0) + x.v; return o; }, {})).sort((a, c) => c[1] - a[1]);
+  const [y, m] = ym.split('-').map(Number), last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  dlg.innerHTML = `<div class="sheethd">${circ(n, icoFor(n, 'e'))}<div><b>${esc(n)}</b><small>${ymLabel(ym)}${roll ? ' · lo que sobra pasa al mes siguiente' : ''}</small></div><button class="iconbtn" aria-label="Cerrar" onclick="dlg.close()"><i class="icon-x"></i></button></div>
+<div style="margin:14px 0 6px"><small class="mut">${lim ? 'Gastado de ' + money(lim) : 'Gastado (sin tope)'}</small><div class="bigbal ${st && st.level == 'out' ? 'out' : ''}">${money(spent)}</div></div>
+${st ? `${bar(st.pct, barCol(st.level))}<div style="display:flex;justify-content:space-between;margin:6px 0 2px"><small class="mut">${lim - spent >= 0 ? 'Te quedan ' + money(lim - spent) : 'Te pasaste por ' + money(spent - lim)}</small><b style="color:${barCol(st.level)}">${st.pct}%</b></div>` : ''}
+${k ? `<p class="mini" style="margin:2px 0 0">${k > 0 ? 'El tope incluye ' + money(k) + ' que te sobró antes.' : 'El tope tiene ' + money(-k) + ' menos porque te pasaste antes.'}</p>` : ''}
+<div class="seg sm" style="margin:12px 0 4px"><button type="button" data-n="${esc(n)}" onclick="openBudLimit(this.dataset.n)"><i class="icon-sliders"></i> ${lim ? 'Cambiar tope' : 'Ponerle tope'}</button><button type="button" data-n="${esc(n)}" onclick="F={c:this.dataset.n,t:'e',f:'${ym}-01',u:'${ym}-${String(last).padStart(2, '0')}'};go('hist')"><i class="icon-list"></i> Ver en Movimientos</button></div>
+${subs.length > 1 ? `<div class="meta" style="margin:8px 0 2px">${subs.slice(0, 6).map(([s0, v]) => pill(s0 + ' · ' + money(v))).join('')}</div>` : ''}
+<h3 class="grph" style="margin-top:16px">${L.length} movimiento${L.length == 1 ? '' : 's'} este mes</h3>
+${L.length ? L.map(x => histRow(x)).join('') : '<p class="empty" style="padding:8px 0">Aún no hay gastos en esta categoría este mes.</p>'}`;
+  dlgShow();
+}
+// Cambiar el tope de una categoría
+function openBudLimit(n) {
   const ym = budYm, ov = ((cfg.budgetOverrides || {})[ym] || {}).cats || {};
   bcf = { n, base: (cfg.budgetCats || {})[n] ?? '', mes: ov[n] ?? '', roll: !!(cfg.rollCats || {})[n] };
   dlg.innerHTML = `<form onsubmit="return svBudCat(event)"><h2>${esc(n)}</h2>
@@ -302,7 +319,7 @@ function openBudCat(n) {
 <label>Solo para ${ymLabel(ym)} (opcional)<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(bcf.mes)}" oninput="bcf.mes=this.value" placeholder="Usa el de todos los meses"></label>
 <label class="toggle"><input type="checkbox" ${bcf.roll ? 'checked' : ''} onchange="bcf.roll=this.checked"> Lo que sobre pasa al mes siguiente</label>
 <p class="mini" style="margin:0">Si un mes no gastas todo, la diferencia se suma al tope del siguiente (y si te pasas, se resta). Cuenta desde este mes.</p>
-<div class="seg"><button type="button" onclick="dlg.close()">Cancelar</button><button class="p">Guardar</button></div></form>`;
+<div class="seg"><button type="button" onclick="openBudCat(bcf.n)">Cancelar</button><button class="p">Guardar</button></div></form>`;
   dlgShow();
 }
 function svBudCat(e) {
@@ -312,7 +329,7 @@ function svBudCat(e) {
   const o = c.budgetOverrides[ym] = c.budgetOverrides[ym] || {}; o.cats = o.cats || {};
   if (mes >= 0 && f.mes !== '') o.cats[f.n] = mes; else delete o.cats[f.n];
   if (f.roll) c.rollCats[f.n] = c.rollCats[f.n] || ym; else delete c.rollCats[f.n];
-  tidyOverrides(c); saveCfg(c); dlg.close(); toast('Tope guardado', { kind: 'ok' }); return false;
+  tidyOverrides(c); saveCfg(c); toast('Tope guardado', { kind: 'ok' }); openBudCat(f.n); return false;
 }
 
 // ============ Más ============
@@ -325,7 +342,7 @@ function renderMore(app) {
 ${tile('bud', 'pie-chart', 'Presupuesto', '', 0, 'brand')}
 ${tile('plan', 'calendar-days', 'Planificar', '', 0, 'blue')}
 ${tile('rec', 'repeat', 'Recurrentes', pend ? pend + ' por confirmar' : '', pend, 'teal')}
-${tile('goal', 'target', 'Metas', goals.length ? goals.length + ' activa' + (goals.length > 1 ? 's' : '') : '', 0, 'pink')}
+${tile('goal', 'target', 'Metas', activeGoals().length ? activeGoals().length + ' activa' + (activeGoals().length > 1 ? 's' : '') : '', 0, 'pink')}
 ${tile('rep', 'bar-chart-3', 'Reportes', '', 0, 'purple')}
 ${tile("debtTab='loans';go('debts')", 'hand-coins', 'Deudas y bienes', ds.total ? money(ds.total) : '', 0, 'yellow')}</div>
 <h3 class="grph">Hogar y herramientas</h3><div class="tiles">
@@ -359,25 +376,40 @@ ${pend.length ? `<div class="card"><h2>Por confirmar (${pend.length})</h2>${pend
 }
 
 // ============ Metas ============
+// Texto del pronóstico de una meta (plan, fecha objetivo y ritmo real)
+function goalForecastHTML(g, fc) {
+  const L = [], pl = fc.pl;
+  if (fc.reached) return `<p class="mini" style="margin:8px 0 0">¡Meta alcanzada! 🎉 Márcala como cumplida para que deje de contar como activa.</p>`;
+  L.push(`Faltan <b>${money(fc.p.remaining)}</b>`);
+  if (pl) L.push(`Plan: ${money(pl.amount)} ${PLAN_FREQ[pl.freq].l}${pl.rec ? ' (automático)' : ''}${fc.date ? ` → llegas ~<b>${fdate(fc.date, 1)}</b>` : ''}`);
+  if (g.due && g.due >= today()) {
+    if (pl && fc.need != null) L.push(`Para el ${fdate(g.due, 1)} necesitas ${money(fc.need)} cada ${PLAN_FREQ[pl.freq].u} ${fc.late ? pill('no llegas a tiempo', 'warn') : pill('llegas a tiempo', 'in')}`);
+    else if (fc.needMonth) L.push(`Para el ${fdate(g.due, 1)} necesitas ~${money(fc.needMonth)} al mes`);
+  } else if (g.due) L.push(`La fecha objetivo (${fdate(g.due, 1)}) ya pasó ${pill('revisa la fecha', 'warn')}`);
+  if (fc.pace && fc.pace.perMonth) L.push(`Tu ritmo real: ~${money(fc.pace.perMonth)} al mes${!pl && fc.pace.monthsLeft ? ` (llegas en ~${fc.pace.monthsLeft} ${fc.pace.monthsLeft == 1 ? 'mes' : 'meses'})` : ''}`);
+  return `<div class="gfc">${L.map(x => `<p class="mini" style="margin:0">${x}</p>`).join('')}${pl ? '' : `<button class="link" style="padding:2px 0" onclick="openGoalForm('${g.id}','plan')"><i class="icon-calendar-days"></i> Ponerle un plan de aportes</button>`}</div>`;
+}
 function renderGoal(app) {
+  const act = activeGoals(), done = goals.filter(g => g.done).sort((a, b) => b.done.localeCompare(a.done));
   app.innerHTML = `${head('Metas', true)}
-${goals.length ? goals.map(g => {
-    const p = goalProgress(g), proj = goalProjection(g), col = accentFor(g.name), acc = accs.find(a => a.id == g.accId);
-    const m = txs.filter(x => x.t == 'g' && x.goalId == g.id).sort((a, b) => b.d.localeCompare(a.d) || (b.u || 0) - (a.u || 0)).slice(0, 6);
-    const rr = recs.filter(r => r.t == 'g' && r.goalId == g.id && r.active !== false);
+${act.length ? act.map(g => {
+    const fc = goalForecast(g), p = fc.p, col = accentFor(g.name), acc = accs.find(a => a.id == g.accId);
+    const m = txs.filter(x => x.t == 'g' && x.goalId == g.id).sort((a, b) => b.d.localeCompare(a.d) || (b.u || 0) - (a.u || 0)).slice(0, 4);
     return `<div class="card"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px"><div style="min-width:0"><h2 style="margin:0">${esc(g.name)}</h2><small class="mut">${acc ? 'En ' + esc(acc.name) : '⚠ Sin cuenta: edítala y átala a una'}${g.note ? ' · ' + esc(g.note) : ''}</small></div><button class="iconbtn" aria-label="Editar meta" onclick="openGoalForm('${g.id}')"><i class="icon-pencil"></i></button></div>
 <div style="display:flex;justify-content:space-between;margin:12px 0 6px"><span class="num">${money(p.saved)} de ${money(g.target)}</span><b style="color:var(--${col})">${p.pct}%</b></div>${bar(p.pct, `var(--${col})`)}
-<p class="mini" style="margin:8px 0 0">${p.remaining > 0 ? 'Faltan ' + money(p.remaining) : '¡Meta alcanzada! 🎉'}${proj && proj.monthsLeft > 0 ? ` · al ritmo de ~${money(proj.perMonth)}/mes, en ~${proj.monthsLeft} ${proj.monthsLeft == 1 ? 'mes' : 'meses'}` : ''}${rr.length ? ' · ' + rr.map(r => `aporte ${freqLabel[r.freq].toLowerCase()} de ${money(r.amount, r.currency)}`).join(', ') : ''}</p>
+${goalForecastHTML(g, fc)}
 ${m.length ? `<div style="margin-top:8px">${m.map(x => histRow(x)).join('')}</div>` : ''}
-<div class="seg sm" style="margin-top:10px"><button class="p" onclick="openContribForm('${g.id}')"><i class="icon-plus"></i> Aportar</button><button onclick="openGoalSim('${g.id}')"><i class="icon-sparkles"></i> Simular</button><button onclick="openRecForm(null,{t:'g',goalId:'${g.id}',freq:'quincenal'})"><i class="icon-repeat"></i> Automático</button></div></div>`;
-  }).join('') : '<p class="empty">Aún no tienes metas. Crea la primera.</p>'}
+${fc.reached ? `<button class="p" style="width:100%;margin-top:10px" onclick="completeGoal('${g.id}','reached')"><i class="icon-party-popper"></i> Marcar como cumplida</button>` : ''}
+<div class="seg sm" style="margin-top:10px"><button class="${fc.reached ? '' : 'p'}" onclick="openContribForm('${g.id}')"><i class="icon-plus"></i> Aportar</button><button onclick="openGoalForm('${g.id}','plan')"><i class="icon-calendar-days"></i> Plan</button><button onclick="openGoalSim('${g.id}')"><i class="icon-sparkles"></i> Simular</button></div></div>`;
+  }).join('') : `<div class="card"><p class="empty" style="margin:0">${done.length ? 'No tienes metas activas. ¡Crea la próxima!' : 'Aún no tienes metas. Crea la primera: un viaje, un fondo de emergencia, algo para la casa…'}</p></div>`}
 <button class="p" style="width:100%" onclick="openGoalForm()"><i class="icon-plus"></i> Nueva meta</button>
+${done.length ? `<details class="card" style="margin-top:14px"><summary>Cumplidas y cerradas (${done.length}) ›</summary>${done.map(g => { const p = goalProgress(g); return `<div class="row">${circ(g.name, g.doneHow == 'closed' ? 'archive' : 'party-popper')}<div><b>${esc(g.name)}</b><small>${g.doneHow == 'closed' ? 'Cerrada' : 'Cumplida'} el ${fdate(g.done, 1)} · ${money(p.saved)} de ${money(g.target)}</small></div><button onclick="reopenGoal('${g.id}')">Reactivar</button></div>`; }).join('')}</details>` : ''}
 ${(() => {
       const orphan = txs.filter(x => x.t == 'g' && !goals.some(g => g.id == x.goalId)); if (!orphan.length) return '';
       const s = orphan.reduce((t, x) => t + x.v, 0);
       return `<div class="card" style="margin-top:12px"><h2>Aportes sin meta (${money(s)})</h2><p class="mini" style="margin:0 0 8px">Quedaron de metas que borraste. Reasígnalos o bórralos.</p>
 ${orphan.map(x => `<div class="row"><div><b class="num">${money(x.v)}</b><small>${fdate(x.d)} · ${esc(x.w)}${x.n ? ' · ' + esc(x.n) : ''}</small></div>
-${goals.length ? `<select style="width:auto;flex:none" onchange="reassignContrib('${x.id}',this.value)"><option value="">Reasignar…</option>${goals.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}
+${activeGoals().length ? `<select style="width:auto;flex:none" onchange="reassignContrib('${x.id}',this.value)"><option value="">Reasignar…</option>${activeGoals().map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('')}</select>` : ''}
 <button class="d" aria-label="Borrar" onclick="delTx('${x.id}')"><i class="icon-trash-2"></i></button></div>`).join('')}</div>`;
     })()}`;
 }

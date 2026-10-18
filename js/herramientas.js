@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['herramientas.js'] = '10.0.0';
+(window.__V = window.__V || {})['herramientas.js'] = '10.1.0';
 /* Mis finanzas — Herramientas: suscripciones detectadas, presupuesto sugerido, simulador de metas,
    lo mío / lo tuyo / lo nuestro, pegar alerta del banco, importar estado de cuenta, reglas de categoría,
    etiquetas y eventos, y cierre de mes. */
@@ -94,7 +94,7 @@ function applySuggest(e) {
 
 // ============ simulador de metas ============
 let gsim = {};
-function openGoalSim(id) { const g = goals.find(x => x.id == id); if (!g) return; const p = goalProjection(g); gsim = { id, per: p && p.perMonth ? Math.round(p.perMonth) : '', date: '' }; drawGoalSim(); }
+function openGoalSim(id) { const g = goals.find(x => x.id == id); if (!g) return; const pl = goalPlan(g), p = goalProjection(g); gsim = { id, per: pl ? Math.round(pl.amount * PLAN_FREQ[pl.freq].pm) : p && p.perMonth ? Math.round(p.perMonth) : '', date: g.due || '' }; drawGoalSim(); }
 function drawGoalSim() {
   const f = gsim, g = goals.find(x => x.id == f.id), p = goalProgress(g), td = today();
   const months = +f.per > 0 ? Math.ceil(p.remaining / +f.per) : null;
@@ -105,7 +105,7 @@ function drawGoalSim() {
 ${months != null ? `<p class="mini" style="margin:0">…llego en <b>${months} ${months == 1 ? 'mes' : 'meses'}</b>, alrededor de <b>${fdate(addMonthsISO(td, months), 1)}</b>${+f.per ? ` (o ${money(+f.per / 2)} por quincena)` : ''}.</p>` : ''}
 <label>Quiero llegar para el…<input type="date" value="${esc(f.date)}" onchange="gsim.date=this.value;drawGoalSim()"></label>
 ${need != null ? `<p class="mini" style="margin:0">…necesito aportar <b>${money(need)} al mes</b> (${money(need / 2)} por quincena).</p>` : ''}
-<div class="seg"><button type="button" onclick="dlg.close()">Cerrar</button>${+f.per > 0 ? `<button type="button" class="p" onclick="dlg.close();openRecForm(null,{t:'g',goalId:'${g.id}',freq:'mensual',amount:${+f.per}})">Crear aporte automático</button>` : ''}</div></form>`;
+<div class="seg"><button type="button" onclick="dlg.close()">Cerrar</button>${+f.per > 0 ? `<button type="button" class="p" onclick="openGoalForm('${g.id}','plan');Object.assign(gform,{freq:'mensual',amount:${+f.per},day:''});drawGoalForm()">Usar como plan</button>` : ''}</div></form>`;
   dlgShow();
 }
 
@@ -386,8 +386,13 @@ function insights() {
   if (pv.inc > 0 && day <= 12) out.push(pv.net < 0 ? { p: 85, ic: 'alert-triangle', c: 'out', t: `En ${mes(pm)} gastaste más de lo que entró`, s: `Saliste ${money(-pv.net)} abajo. Revisa tus topes en Presupuesto.`, go: "go('bud')" }
     : { p: 35, ic: 'piggy-bank', c: 'in', t: `En ${mes(pm)} ahorraste ${pv.rate}%`, s: `Entraron ${money(pv.inc)} y salieron ${money(pv.exp)}.`, go: "repYm='" + pm + "';repTab='res';go('rep')" });
   // meta más cercana
-  const gl = goals.map(g => ({ g, p: goalProgress(g), j: goalProjection(g) })).filter(x => x.p.remaining > 0 && x.j && x.j.monthsLeft > 0).sort((a, b) => a.j.monthsLeft - b.j.monthsLeft)[0];
-  if (gl) out.push({ p: 25, ic: 'target', c: 'teal', t: `“${esc(gl.g.name)}”: llegas en ~${gl.j.monthsLeft} ${gl.j.monthsLeft == 1 ? 'mes' : 'meses'}`, s: `Vas por ${gl.p.pct}% al ritmo de ~${money(gl.j.perMonth)} al mes.`, go: "go('goal')" });
+  const fcs = activeGoals().map(g => ({ g, f: goalForecast(g) }));
+  const won = fcs.find(x => x.f.reached);
+  if (won) out.push({ p: 75, ic: 'party-popper', c: 'in', t: `¡Lograste “${esc(won.g.name)}”! 🎉`, s: 'Márcala como cumplida para que deje de contar como activa.', go: "go('goal')" });
+  const late = fcs.find(x => x.f.late && x.g.due);
+  if (late) out.push({ p: 60, ic: 'target', c: 'warn', t: `“${esc(late.g.name)}” va atrasada`, s: `Para el ${fdate(late.g.due, 1)} necesitas ${money(late.f.need)} cada ${PLAN_FREQ[late.f.pl.freq].u}.`, go: "go('goal')" });
+  const gl = fcs.filter(x => !x.f.reached && (x.f.date || (x.f.pace && x.f.pace.monthsLeft > 0))).sort((a, b) => (a.f.date || addMonthsISO(today(), a.f.pace.monthsLeft)).localeCompare(b.f.date || addMonthsISO(today(), b.f.pace.monthsLeft)))[0];
+  if (gl && gl != late) out.push({ p: 25, ic: 'target', c: 'teal', t: gl.f.date ? `“${esc(gl.g.name)}”: llegas ~${fdate(gl.f.date, 1)}` : `“${esc(gl.g.name)}”: llegas en ~${gl.f.pace.monthsLeft} ${gl.f.pace.monthsLeft == 1 ? 'mes' : 'meses'}`, s: `Vas por ${gl.f.p.pct}%${gl.f.pl ? ` con ${money(gl.f.pl.amount)} ${PLAN_FREQ[gl.f.pl.freq].l}` : ` al ritmo de ~${money(gl.f.pace.perMonth)} al mes`}.`, go: "go('goal')" });
   return out.sort((a, b) => b.p - a.p).slice(0, 3);
 }
 function insightsCard() {

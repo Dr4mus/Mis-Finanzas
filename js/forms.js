@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['forms.js'] = '10.0.0';
+(window.__V = window.__V || {})['forms.js'] = '10.1.0';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
 // Un solo control para el tipo: Egreso · Ingreso · Transferir · Meta
@@ -264,7 +264,7 @@ function drawRecForm() {
 <div class="seg sm">${Object.entries(REC_T).map(([k, l]) => `<button type="button" class="${f.t == k ? 'on' : ''}" onclick="rm2.t='${k}';rm2.c=null;drawRecForm()">${l.replace('Aporte a meta', 'A meta')}</button>`).join('')}</div>
 <label>Nombre<input required value="${esc(f.name)}" oninput="rm2.name=this.value" placeholder="${f.t == 'g' ? 'Ej: Ahorro quincenal' : f.t == 'tr' ? 'Ej: Pago de tarjeta' : 'Ej: Luz, Internet, Salario…'}"></label>
 ${money_t ? `<label>Categoría<select onchange="rm2.c=this.value">${opts(cfg.cats.filter(c => c.t == f.t).map(c => c.n), f.c)}</select></label>` : ''}
-${f.t == 'g' ? (goals.length ? `<label>Meta<select onchange="rm2.goalId=this.value">${goals.map(g => `<option value="${g.id}"${g.id == f.goalId ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>` : '<p class="note">Primero crea una meta en Más → Metas.</p>') : ''}
+${f.t == 'g' ? (goals.some(g => !g.done || g.id == f.goalId) ? `<label>Meta<select onchange="rm2.goalId=this.value">${goals.filter(g => !g.done || g.id == f.goalId).map(g => `<option value="${g.id}"${g.id == f.goalId ? ' selected' : ''}>${esc(g.name)}</option>`).join('')}</select></label>` : '<p class="note">Primero crea una meta en Más → Metas.</p>') : ''}
 <label>${f.t == 'g' || f.t == 'tr' ? 'Desde la cuenta' : 'Cuenta'}<select onchange="rm2.accId=this.value;drawRecForm()">${accs.map(a => `<option value="${a.id}"${f.accId == a.id ? ' selected' : ''}>${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>
 ${f.t == 'tr' ? `<label>Hacia la cuenta<select onchange="rm2.accIdTo=this.value">${accs.filter(a => a.id != f.accId).map(a => `<option value="${a.id}"${f.accIdTo == a.id ? ' selected' : ''}>${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>` : ''}
 <div class="two"><label>Monto<input type="number" inputmode="decimal" step="0.01" min="0.01" required value="${esc(f.amount)}" oninput="rm2.amount=this.value"></label>
@@ -365,32 +365,85 @@ function reassignContrib(id, goalId) {
   saveTx({ ...x, goalId, home: g.accId }); toast('Aporte reasignado', { kind: 'ok' });
 }
 let gform = {};
-function openGoalForm(id) { const x = goals.find(g => g.id == id) || {}; gform = { id: x.id, name: x.name || '', target: x.target || '', accId: x.accId || '', note: x.note || '' }; drawGoalForm(); }
+function openGoalForm(id, focus) {
+  const x = goals.find(g => g.id == id) || {}, pl = x.id ? goalPlan(x) : null, td = today();
+  gform = { id: x.id, name: x.name || '', target: x.target || '', accId: x.accId || '', note: x.note || '', due: x.due || '', done: x.done || '',
+    freq: pl ? pl.freq : '', amount: pl ? pl.amount : '', day: pl && pl.day != null ? pl.day : '', remind: !!(pl && pl.rec), recId: pl && pl.rec ? pl.rec.id : null, focus };
+  drawGoalForm();
+}
+// Fechas de ejemplo y cálculo del plan mientras lo escribes
+function goalPlanPreview(f) {
+  if (!PLAN_FREQ[f.freq]) return '';
+  const fc = goalForecast({ id: f.id || '_nueva', target: +f.target || 0, due: f.due }, { freq: f.freq, amount: +f.amount > 0 ? +f.amount : 1, day: planDay(f) }); // sin monto, igual calcula lo necesario para la fecha
+  if (fc.reached) return '<p class="mini" style="margin:0">Esta meta ya está completa.</p>';
+  const u = PLAN_FREQ[f.freq].u;
+  let h = '';
+  if (+f.amount > 0 && fc.date) h += `<p class="note" style="margin:0">Con <b>${money(+f.amount)}</b> ${PLAN_FREQ[f.freq].l} llegas alrededor del <b>${fdate(fc.date, 1)}</b> (${fc.n} aporte${fc.n == 1 ? '' : 's'}).</p>`;
+  if (f.due && fc.need) h += `<p class="mini" style="margin:0">Para llegar el ${fdate(f.due, 1)} necesitas <b>${money(fc.need)}</b> cada ${u}. <button type="button" class="link" style="display:inline;padding:0 4px;min-height:0" onclick="gform.amount='${Math.ceil(fc.need)}';drawGoalForm()">Usar ${money(Math.ceil(fc.need))}</button></p>`;
+  return h;
+}
+const planDay = f => f.freq == 'semanal' ? (f.day !== '' && f.day != null ? +f.day : new Date(today() + 'T12:00:00').getDay()) : f.freq == 'mensual' ? (f.day || +today().slice(8, 10) > 28 ? (f.day || 'ultimo') : +today().slice(8, 10)) : 1;
 function drawGoalForm() {
-  const f = gform, ok = accs.filter(a => !isDebtAcc(a) && a.currency == 'DOP');
-  dlg.innerHTML = `<form onsubmit="return svGoal(event)"><h2>${f.id ? 'Editar' : 'Nueva'} meta</h2>
+  const f = gform, ok = accs.filter(a => !isDebtAcc(a) && a.currency == 'DOP'), dy = planDay(f);
+  const dayField = f.freq == 'semanal' ? `<label>Día<select onchange="gform.day=this.value;drawGoalForm()">${WEEKDAYS.map((w, i) => `<option value="${i}"${dy == i ? ' selected' : ''}>${w}</option>`).join('')}</select></label>`
+    : f.freq == 'mensual' ? `<label>Día del mes<select onchange="gform.day=this.value;drawGoalForm()"><option value="ultimo"${dy == 'ultimo' ? ' selected' : ''}>Último día</option>${[...Array(28)].map((_, i) => `<option value="${i + 1}"${dy == i + 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select></label>` : '';
+  dlg.innerHTML = `<form onsubmit="return svGoal(event)"><h2>${f.id ? 'Editar meta' : 'Nueva meta'}${f.done ? ' ' + pill('Cumplida', 'in') : ''}</h2>
 <label>Nombre<input required value="${esc(f.name)}" oninput="gform.name=this.value" placeholder="Ej: Fondo de emergencia, Viaje…"></label>
-<label>Monto objetivo (DOP)<input type="number" inputmode="decimal" step="0.01" min="0.01" required value="${esc(f.target)}" oninput="gform.target=this.value"></label>
-${ok.length ? `<label>Cuenta donde está este ahorro<select required onchange="gform.accId=this.value"><option value="" disabled${ok.some(a => a.id == f.accId) ? '' : ' selected'}>Elige una cuenta…</option>${ok.map(a => `<option value="${a.id}"${f.accId == a.id ? ' selected' : ''}>${esc(a.name)} · ${money(acctBalance(a), a.currency)}</option>`).join('')}</select></label><p class="mini" style="margin:0">Varias metas pueden compartir una cuenta; cada una lleva su avance.</p>`
+<div class="two"><label>Monto objetivo (DOP)<input type="number" inputmode="decimal" step="0.01" min="0.01" required value="${esc(f.target)}" oninput="gform.target=this.value" onchange="drawGoalForm()"></label>
+<label>Para cuándo (opcional)<input type="date" value="${esc(f.due)}" onchange="gform.due=this.value;drawGoalForm()"></label></div>
+${ok.length ? `<label>Cuenta donde está este ahorro<select required onchange="gform.accId=this.value"><option value="" disabled${ok.some(a => a.id == f.accId) ? '' : ' selected'}>Elige una cuenta…</option>${ok.map(a => `<option value="${a.id}"${f.accId == a.id ? ' selected' : ''}>${esc(a.name)} · ${money(acctBalance(a), a.currency)}</option>`).join('')}</select></label>`
       : `<p class="note">Toda meta va atada a una cuenta en pesos (no tarjetas). Primero agrégala en Cuentas.</p>`}
+<div class="card" id="gf-plan" style="margin:0;padding:12px;box-shadow:none;background:var(--soft);border:0"><h2 style="font-size:14px;margin-bottom:8px"><i class="icon-calendar-days"></i> Plan de aportes</h2>
+<div class="two"><label>¿Cada cuánto?<select onchange="gform.freq=this.value;gform.day='';drawGoalForm()"><option value=""${!f.freq ? ' selected' : ''}>Sin plan</option>${Object.entries(PLAN_FREQ).map(([k, v]) => `<option value="${k}"${f.freq == k ? ' selected' : ''}>${v.l[0].toUpperCase() + v.l.slice(1)}</option>`).join('')}</select></label>
+<label>¿Cuánto cada vez?<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(f.amount)}" oninput="gform.amount=this.value" onchange="drawGoalForm()" ${f.freq ? '' : 'disabled'} placeholder="${f.freq ? 'Ej: 2000' : '—'}"></label></div>
+${dayField ? `<div style="margin-top:8px">${dayField}</div>` : ''}
+<div style="display:grid;gap:6px;margin-top:8px">${goalPlanPreview(f)}</div>
+${f.freq ? `<label class="toggle" style="margin-top:8px"><input type="checkbox" ${f.remind ? 'checked' : ''} onchange="gform.remind=this.checked"> Recordarme cada aporte (sale en Pendientes para confirmarlo)</label>` : '<p class="mini" style="margin:6px 0 0">Con un plan, la app te dice cuándo la cumples y si vas a tiempo.</p>'}</div>
 <input value="${esc(f.note)}" oninput="gform.note=this.value" placeholder="Nota (opcional)" aria-label="Nota">
+${f.id ? `<div class="seg sm">${f.done ? `<button type="button" onclick="reopenGoal('${f.id}')"><i class="icon-rotate-ccw"></i> Reactivar</button>` : `<button type="button" onclick="completeGoal('${f.id}','reached')"><i class="icon-party-popper"></i> Cumplida</button><button type="button" onclick="completeGoal('${f.id}','closed')"><i class="icon-archive"></i> Ya no la necesito</button>`}</div>` : ''}
 ${footer(f.id, `delGoal('${f.id}')`)}</form>`;
   dlgShow();
+  if (f.focus == 'plan') { f.focus = ''; setTimeout(() => { const el = $('gf-plan'); if (el) el.scrollIntoView({ block: 'center' }); }, 80); }
 }
 async function svGoal(e) {
-  e.preventDefault(); const f = gform, t = parseFloat(f.target);
+  e.preventDefault(); const f = gform, t = parseFloat(f.target), amt = parseFloat(f.amount);
   if (!(t > 0)) return fail('Escribe un monto objetivo mayor que cero.');
   const na = accs.find(a => a.id == f.accId && !isDebtAcc(a) && a.currency == 'DOP');
   if (!na) return fail('Elige la cuenta donde está este ahorro.');
+  if (f.freq && !(amt > 0)) return fail('Escribe cuánto vas a aportar cada vez (o elige “Sin plan”).');
   const prev = f.id && goals.find(g => g.id == f.id);
   if (prev && (prev.accId || '') != (f.accId || '')) {
     const sv = goalProgress(prev).saved;
-    if (sv > 0) {
+    if (sv > 0 && !prev.done) {
       if (freeBal(na) < sv - 0.005) return fail(`“${na.name}” no tiene saldo libre para los ${money(sv)} de esta meta.`);
       if (!(await ask(`Los ${money(sv)} ahorrados pasarán a contarse dentro de “${na.name}” y saldrán de la cuenta anterior.`, { title: '¿Cambiar de cuenta?', ok: 'Cambiar' }))) return false;
     }
   }
-  saveGoal({ id: f.id, name: f.name.trim(), target: t, accId: f.accId, note: f.note.trim() }); dlg.close(); toast('Meta guardada', { kind: 'ok' }); return false;
+  const id = f.id || uid(), plan = f.freq ? { freq: f.freq, amount: round2(amt), day: planDay(f) } : null;
+  saveGoal({ id, name: f.name.trim(), target: t, accId: f.accId, note: f.note.trim(), due: f.due || '', plan });
+  // aporte automático (Recurrentes) al día con el plan
+  const r = f.recId && recs.find(x => x.id == f.recId);
+  if (plan && f.remind) saveRec({ ...(r || {}), id: r ? r.id : undefined, name: r ? r.name : 'Aporte a ' + f.name.trim(), t: 'g', goalId: id, accId: (r && accs.some(a => a.id == r.accId)) ? r.accId : f.accId, amount: plan.amount, currency: 'DOP', freq: plan.freq, day: plan.day, startDate: r ? r.startDate : today(), active: true, w: (r && r.w) || defaultWho() }, { noRender: true });
+  else if (r && (!plan || !f.remind)) saveRec({ ...r, active: false }, { noRender: true });
+  dlg.close(); render(); toast(f.id ? 'Meta guardada' : 'Meta creada', { kind: 'ok' }); return false;
+}
+// Cumplida (la lograste) o cerrada (ya no la necesitas): deja de contar como activa y libera lo apartado
+async function completeGoal(id, how) {
+  const g = goals.find(x => x.id == id); if (!g) return;
+  const p = goalProgress(g), acc = accs.find(a => a.id == g.accId), rr = recs.filter(r => r.t == 'g' && r.goalId == id && r.active !== false);
+  const ok = await ask((how == 'reached' ? `“${g.name}” pasa a tus metas cumplidas y deja de contar como activa.` : `“${g.name}” se cierra y deja de contar como activa.`)
+    + (p.saved > 0 ? `\n\nLos ${money(p.saved)} apartados quedan libres en “${acc ? acc.name : 'su cuenta'}”. Si ya los gastaste, anota el gasto.` : '')
+    + (rr.length ? `\nSu aporte automático se pausa.` : '') + '\n\nPuedes reactivarla cuando quieras.', { title: how == 'reached' ? '¿Marcar como cumplida?' : '¿Cerrar esta meta?', ok: how == 'reached' ? 'Sí, la cumplí' : 'Cerrar meta' });
+  if (!ok) return;
+  rr.forEach(r => saveRec({ ...r, active: false }, { noRender: true }));
+  saveGoal({ ...g, done: today(), doneHow: how }); if (dlg.open) dlg.close();
+  if (how == 'reached') confetti();
+  toast(how == 'reached' ? '¡Meta cumplida! 🎉' : 'Meta cerrada', { kind: 'ok', ...(p.saved > 0 && acc ? { action: 'Anotar el gasto', ms: 9000, onAction: () => { openForm(); Object.assign(fm, { a: String(p.saved), accId: acc.id, sub: g.name.slice(0, 40) }); drawForm(); } } : {}) });
+}
+async function reopenGoal(id) {
+  const g = goals.find(x => x.id == id); if (!g) return; const p = goalProgress(g), acc = accs.find(a => a.id == g.accId);
+  if (acc && p.saved > 0 && freeBal(acc) < p.saved - 0.005 && !(await ask(`En “${acc.name}” ya no hay ${money(p.saved)} libres para apartar. Si la reactivas, el saldo libre quedará en negativo hasta que corrijas los aportes.`, { title: '¿Reactivar igual?', ok: 'Reactivar' }))) return;
+  saveGoal({ ...g, done: '', doneHow: '' }); if (dlg.open) dlg.close(); toast('Meta reactivada', { kind: 'ok' });
 }
 async function delGoal(id) { if (!(await ask('El dinero ahorrado se queda en la cuenta; solo deja de estar apartado.', { title: '¿Borrar esta meta?', ok: 'Borrar', danger: true }))) return; removeItem('goal', id); dlg.close(); render(); toast('Meta borrada'); }
 let cform = {};
@@ -400,10 +453,10 @@ function needTie(gid) { if (tiedAcc(gid)) return false; toast('Esta meta no est�
 function pickGoal(gid) { cform.goalId = gid; if (needTie(gid)) return; syncGoalAcc(); drawContribForm(); }
 // openContribForm(meta) nuevo; openContribForm(meta, id) edita un aporte o retiro
 function openContribForm(goalId, id) {
-  if (!goals.length) return fail('Primero crea una meta en Más → Metas.');
-  if (!accs.length) return fail('Primero crea una cuenta.');
   const x = id && txs.find(t => t.id == id);
-  const g0 = goals.find(q => q.id == (x ? x.goalId : goalId)) || goals[0];
+  if (!x && !activeGoals().length) return fail(goals.length ? 'Todas tus metas están cumplidas o cerradas. Crea una nueva en Más → Metas.' : 'Primero crea una meta en Más → Metas.');
+  if (!accs.length) return fail('Primero crea una cuenta.');
+  const g0 = goals.find(q => q.id == (x ? x.goalId : goalId) && (x || !q.done)) || activeGoals()[0];
   if (x) cform = { id: x.id, goalId: g0.id, date: x.d, dir: x.v < 0 ? 'out' : 'in', accId: x.accId, amount: Math.abs(x.a), vdop: Math.abs(x.v), w: x.w || defaultWho(), note: x.n || '', cr: x.cr, rec: x.rec };
   else cform = { goalId: g0.id, date: today(), dir: 'in', accId: accs[0].id, amount: '', vdop: '', w: defaultWho(), note: '' };
   if (needTie(g0.id)) return; syncGoalAcc(); drawContribForm();
@@ -412,7 +465,7 @@ function drawContribForm() {
   const f = cform, acc = accs.find(a => a.id == f.accId), fx = acc && acc.currency != 'DOP', h = tiedAcc(f.goalId), other = h && f.accId != h.id;
   dlg.innerHTML = `<form onsubmit="return svContrib(event)"><h2>${f.id ? 'Editar aporte' : 'Nuevo movimiento'}</h2>${f.id ? '' : mvTabs('g')}
 <div class="seg"><button type="button" class="${f.dir == 'in' ? 'on' : ''}" onclick="cform.dir='in';drawContribForm()">Cuenta → Meta</button><button type="button" class="${f.dir == 'out' ? 'on' : ''}" onclick="cform.dir='out';drawContribForm()">Meta → Cuenta</button></div>
-<label>Meta<select onchange="pickGoal(this.value)">${goals.map(g => `<option value="${g.id}"${g.id == f.goalId ? ' selected' : ''}>${esc(g.name)} · ${money(goalProgress(g).saved)}</option>`).join('')}</select></label>
+<label>Meta<select onchange="pickGoal(this.value)">${goals.filter(g => !g.done || g.id == f.goalId).map(g => `<option value="${g.id}"${g.id == f.goalId ? ' selected' : ''}>${esc(g.name)} · ${money(goalProgress(g).saved)}</option>`).join('')}</select></label>
 <label>${f.dir == 'in' ? 'Cuenta de origen' : 'Cuenta destino'}<select onchange="cform.accId=this.value;drawContribForm()">${accs.map(a => accOpt(a, f.accId, f.date)).join('')}</select></label>
 <p class="mini" style="margin:0">${h ? (other ? 'La meta está en “' + esc(h.name) + '”: el dinero se mueve entre las dos cuentas.' : 'El dinero ya está en “' + esc(h.name) + '”; solo se aparta para la meta.') : ''}</p>
 <div class="amount"><input type="number" inputmode="decimal" step="0.01" min="0.01" required placeholder="0.00" aria-label="Monto" value="${esc(f.amount)}" oninput="cform.amount=this.value"><select disabled aria-label="Moneda"><option>${acc ? acc.currency : 'DOP'}</option></select></div>

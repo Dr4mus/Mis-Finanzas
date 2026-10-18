@@ -1,6 +1,6 @@
 # Mis finanzas · Vélez García
 
-App de finanzas personales y de pareja: cuentas, movimientos, presupuesto, recurrentes, metas, gastos compartidos y planificación. Versión 10.0.0.
+App de finanzas personales y de pareja: cuentas, movimientos, presupuesto, recurrentes, metas, gastos compartidos y planificación. Versión 10.1.0.
 
 Se instala en el teléfono desde el navegador (sin tiendas de apps), funciona sin internet y, si conectas tu propio Firebase, se sincroniza entre los teléfonos del hogar.
 
@@ -17,7 +17,7 @@ Se instala en el teléfono desde el navegador (sin tiendas de apps), funciona si
 
 Sube el contenido del zip nuevo encima del anterior (**Add file → Upload files → Commit changes**). Los zips **nunca traen `js/config.js`**, así que tu conexión con Firebase no se borra. Luego abre la app y toca **Actualizar** cuando lo pida. En **Ajustes**, abajo, verás la versión.
 
-## Qué hay en la versión 10.0.0
+## Qué hay en la versión 10.1.0
 
 - **¿Te alcanza?** hasta tu próximo cobro, **saldo proyectado** a 30/60/90 días y **calendario de pagos** (Más → Planificar).
 - **Comparado con tu promedio** por categoría (Inicio y Reportes).

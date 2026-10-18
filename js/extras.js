@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['extras.js'] = '10.0.0';
+(window.__V = window.__V || {})['extras.js'] = '10.1.0';
 /* Mis finanzas — atajos, Inicio personalizable, bienvenida, papelera y recordatorio de respaldo. */
 
 // ============ atajos de movimientos frecuentes ============
