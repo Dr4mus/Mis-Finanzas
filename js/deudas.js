@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['deudas.js'] = '10.1.0';
+(window.__V = window.__V || {})['deudas.js'] = '10.2.0';
 /* Mis finanzas — Deudas y bienes: préstamos con tabla de pagos, deudas con personas (yo debo / me deben),
    bienes (casa, vehículo…), plan para salir de deudas y calculadora de préstamos. */
 let debtTab = 'loans', planExtra = '', planStrat = 'avalanche';
@@ -291,13 +291,16 @@ function debtAlerts() {
   const out = [], td = today();
   accs.filter(isLoan).forEach(a => {
     const cy = loanCycle(a); if (!cy || cy.done || cy.paid || (!cy.missed && cy.days > 10)) return; const dl = dueLabel(cy.due);
-    out.push(`<div class="alert">${circ(a.name, loanIcon(a.loanKind))}<div><b>Cuota de ${esc(a.name)}</b><small>${money(cy.payment, a.currency)} · ${fdate(cy.due)} ${pill(cy.missed ? 'Atrasada' : dl.t, cy.missed ? 'out' : dl.k || '')}</small></div><button onclick="openLoanPay('${a.id}')">Pagar</button></div>`);
+    out.push(AL(`loan:${a.id}:${cy.due}`, 'loan:' + a.id, `Cuota de ${a.name}`, 'Cuota de ' + a.name, loanIcon(a.loanKind), 'Vuelve a salir con la próxima cuota.',
+      alRow(`${circ(a.name, loanIcon(a.loanKind))}<div><b>Cuota de ${esc(a.name)}</b><small>${money(cy.payment, a.currency)} · ${fdate(cy.due)} ${pill(cy.missed ? 'Atrasada' : dl.t, cy.missed ? 'out' : dl.k || '')}</small></div><button onclick="openLoanPay('${a.id}')">Pagar</button>`)));
   });
   debts.filter(d => d.status == 'open' && d.due && daysBetween(td, d.due) <= 7).forEach(d => {
     const dl = dueLabel(d.due);
-    out.push(`<div class="alert">${circ(d.who, 'user')}<div><b>${d.dir == 'owe' ? 'Pagarle a ' : 'Cobrarle a '}${esc(d.who)}</b><small>${money(debtLeft(d), d.cu)} · ${fdate(d.due)} ${pill(dl.t, dl.k)}</small></div><button onclick="openDebtPay('${d.id}')">${d.dir == 'owe' ? 'Pagar' : 'Cobrar'}</button></div>`);
+    const tt = (d.dir == 'owe' ? 'Pagarle a ' : 'Cobrarle a ') + d.who;
+    out.push(AL(`debt:${d.id}:${d.due}`, 'debt:' + d.id, tt, tt, 'user', 'Vuelve a salir si cambias la fecha.',
+      alRow(`${circ(d.who, 'user')}<div><b>${esc(tt)}</b><small>${money(debtLeft(d), d.cu)} · ${fdate(d.due)} ${pill(dl.t, dl.k)}</small></div><button onclick="openDebtPay('${d.id}')">${d.dir == 'owe' ? 'Pagar' : 'Cobrar'}</button>`)));
   });
-  return out.join('');
+  return out; // avisos de Inicio (ver homeAlerts)
 }
 // Fechas de cuotas de préstamos entre dos fechas (para proyección, calendario y te alcanza)
 function loanDues(from, to) {

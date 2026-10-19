@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['screens.js'] = '10.1.0';
+(window.__V = window.__V || {})['screens.js'] = '10.2.0';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
@@ -55,36 +55,112 @@ function histRow(x, gone) {
 }
 
 // ============ Inicio ============
-function alertsHTML() {
+// Cada aviso de Inicio es { k, r, l, t, ic, ig, h }:
+//   k = este aviso en particular (“Ignorar” lo esconde hasta que cambie: otro corte, otro mes, otra fecha)
+//   r = la regla (“No volver a avisar” la silencia para siempre) y l su nombre para la lista de silenciados
+//   t, ic = título e ícono para la hoja de opciones; ig = cuándo vuelve si lo ignoras; h = el HTML (%M% = botón ⋯)
+const AL = (k, r, l, t, ic, ig, h) => ({ k, r, l, t, ic, ig, h });
+const alRow = (body, extra) => `<div class="alert"${extra || ''}>${body}%M%</div>`;
+function homeAlerts() {
   const td = today(), out = [];
-  const pend = pendingRecurring();
-  pend.slice(0, 4).forEach(q => {
+  pendingRecurring().forEach(q => {
     const r = recs.find(x => x.id == q.recId); if (!r) return; const dl = dueLabel(q.date);
-    out.push(`<div class="alert">${circ(r.name, recIcon(r))}<div><b>${esc(r.name)}</b><small>${money(r.amount, r.currency)} · ${fdate(q.date)} ${pill(dl.t, dl.k || 'warn')}</small></div><button class="p" onclick="confirmRec('${q.recId}','${q.date}')">Confirmar</button></div>`);
+    out.push(AL(`pend:${r.id}:${q.date}`, 'pend:' + r.id, `Confirmar “${r.name}” (recurrente)`, r.name, recIcon(r), 'Sigue pendiente en Recurrentes. Vuelve a salir con el próximo pago.',
+      alRow(`${circ(r.name, recIcon(r))}<div><b>${esc(r.name)}</b><small>${money(r.amount, r.currency)} · ${fdate(q.date)} ${pill(dl.t, dl.k || 'warn')}</small></div><button class="p" onclick="confirmRec('${q.recId}','${q.date}')">Confirmar</button>`)));
   });
-  if (pend.length > 4) out.push(`<button class="link" onclick="go('rec')">Ver los ${pend.length} pendientes</button>`);
   accs.forEach(a => {
     const cy = cardCycle(a); if (!cy || cy.left <= 0 || cy.days > 10) return; const dl = dueLabel(cy.pay);
-    out.push(`<div class="alert">${circ(a.name, 'credit-card')}<div><b>Pagar ${esc(a.name)}</b><small>${money(cy.left, a.currency)} del corte del ${fdate(cy.cut)} · pago ${fdate(cy.pay)} ${pill(dl.t, dl.k || '')}</small></div><button onclick="openTransferForm(null,'${a.id}',${cy.left})">Pagar</button></div>`);
+    out.push(AL(`card:${a.id}:${cy.cut}`, 'card:' + a.id, `Pago de la tarjeta ${a.name}`, 'Pagar ' + a.name, 'credit-card', 'Vuelve a salir con el próximo corte.',
+      alRow(`${circ(a.name, 'credit-card')}<div><b>Pagar ${esc(a.name)}</b><small>${money(cy.left, a.currency)} del corte del ${fdate(cy.cut)} · pago ${fdate(cy.pay)} ${pill(dl.t, dl.k || '')}</small></div><button onclick="openTransferForm(null,'${a.id}',${cy.left})">Pagar</button>`)));
   });
   const soon = [];
   recs.filter(r => r.active !== false).forEach(r => nextDates(r, maxISO(addDay(td), recFrom(r)), addDays(td, 7)).filter(d => !(r.done || []).includes(d)).forEach(d => soon.push({ r, d })));
-  soon.sort((x, y) => x.d.localeCompare(y.d)).slice(0, 4).forEach(({ r, d }) => { const dl = dueLabel(d); out.push(`<div class="alert">${circ(r.name, recIcon(r))}<div><b>${esc(r.name)}</b><small>${fdate(d)} ${pill(dl.t, dl.k)}</small></div><b class="num">${money(r.amount, r.currency)}</b></div>`); });
-  settlements().forEach(s => out.push(`<div class="alert">${circ(s.from, 'users')}<div><b>${esc(s.from)} le debe a ${esc(s.to)}</b><small>Gastos compartidos · ${money(s.amount)}</small></div><button onclick="go('shared')">Ver</button></div>`));
+  soon.sort((x, y) => x.d.localeCompare(y.d)).forEach(({ r, d }) => {
+    const dl = dueLabel(d);
+    out.push(AL(`soon:${r.id}:${d}`, 'soon:' + r.id, `Aviso antes de cada “${r.name}”`, r.name, recIcon(r), 'Vuelve a salir antes del próximo pago.',
+      alRow(`${circ(r.name, recIcon(r))}<div><b>${esc(r.name)}</b><small>${fdate(d)} ${pill(dl.t, dl.k)}</small></div><b class="num">${money(r.amount, r.currency)}</b>`)));
+  });
+  settlements().forEach(s => out.push(AL(`set:${s.from}>${s.to}:${round2(s.amount)}`, `set:${s.from}>${s.to}`, `Gastos compartidos: ${s.from} le debe a ${s.to}`, `${s.from} le debe a ${s.to}`, 'users', 'Vuelve a salir si cambia el monto.',
+    alRow(`${circ(s.from, 'users')}<div><b>${esc(s.from)} le debe a ${esc(s.to)}</b><small>Gastos compartidos · ${money(s.amount)}</small></div><button onclick="go('shared')">Ver</button>`))));
   const ym = td.slice(0, 7), b = budgetFor(ym), cs = grp(txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), 'c');
   Object.entries(b.cats || {}).filter(([c, l]) => l > 0 && (cs[c] || 0) / l >= 0.8).forEach(([c, l]) => {
-    const p = Math.round((cs[c] || 0) / l * 100);
-    out.push(`<div class="alert" role="button" style="cursor:pointer" data-c="${esc(c)}" onclick="budYm='${ym}';openBudCat(this.dataset.c)">${circ(c, icoFor(c, 'e'))}<div><b>${esc(c)}: ${p}% del tope</b><small>${money(cs[c] || 0)} de ${money(l)}</small>${bar(p, barCol(p >= 100 ? 'out' : 'yellow'))}</div></div>`);
+    const p = Math.round((cs[c] || 0) / l * 100), lvl = p >= 100 ? 100 : 80;
+    out.push(AL(`bud:${c}:${ym}:${lvl}`, 'bud:' + c, `Presupuesto de ${c}`, `${c}: ${p}% del tope`, icoFor(c, 'e'), lvl < 100 ? 'Vuelve a salir si llegas al 100% o el mes que viene.' : 'Vuelve a salir el mes que viene.',
+      alRow(`${circ(c, icoFor(c, 'e'))}<div><b>${esc(c)}: ${p}% del tope</b><small>${money(cs[c] || 0)} de ${money(l)}</small>${bar(p, barCol(p >= 100 ? 'out' : 'yellow'))}</div>`, ` role="button" style="cursor:pointer" data-c="${esc(c)}" onclick="budYm='${ym}';openBudCat(this.dataset.c)"`)));
   });
-  out.push(debtAlerts());
-  out.push(closeAlert());
+  out.push(...debtAlerts());
+  const ca = closeAlert(); if (ca) out.push(ca);
   try {
-    projection(30).negatives.forEach(n => out.push(`<div class="alert">${circ(n.acc.name, 'alert-triangle')}<div><b>${esc(n.acc.name)} quedaría en negativo</b><small>${n.now ? 'Ya está en negativo' : 'Desde el ' + fdate(n.d) + ' con tus recurrentes'} · hasta ${money(n.v, n.acc.currency)}</small></div><button onclick="go('plan')">Ver</button></div>`));
+    projection(30).negatives.forEach(n => out.push(AL(`neg:${n.acc.id}:${n.now ? 'ya' : n.d}`, 'neg:' + n.acc.id, `Saldo negativo en ${n.acc.name}`, `${n.acc.name} quedaría en negativo`, 'alert-triangle', 'Vuelve a salir si cambia la fecha en que quedaría en negativo.',
+      alRow(`${circ(n.acc.name, 'alert-triangle')}<div><b>${esc(n.acc.name)} quedaría en negativo</b><small>${n.now ? 'Ya está en negativo' : 'Desde el ' + fdate(n.d) + ' con tus recurrentes'} · hasta ${money(n.v, n.acc.currency)}</small></div><button onclick="go('plan')">Ver</button>`))));
   } catch (e) { console.error(e); }
-  out.push(backupAlert());
-  return out.join('');
+  const bk = backupAlert(); if (bk) out.push(bk);
+  return out;
+}
+
+// ---- ignorar / no volver a avisar: se guarda por persona (cfg.alertsOff[nombre]) y viaja con la nube del hogar ----
+const AL_KEEP = 120; // días que se recuerda un aviso ignorado
+const alWho = () => myPerson() || '_';
+function alertPrefs() { const a = (cfg.alertsOff || {})[alWho()] || {}; return { mute: a.mute || {}, skip: a.skip || {} }; }
+const alertOn = (a, p) => { p = p || alertPrefs(); return !p.mute[a.r] && !p.skip[a.k]; };
+function setAlertPrefs(fn) {
+  const all = deep(cfg.alertsOff || {}), cur = alertPrefs(), nx = { mute: { ...cur.mute }, skip: { ...cur.skip } }, lim = addDays(today(), -AL_KEEP);
+  fn(nx);
+  Object.keys(nx.skip).forEach(k => { if (!(nx.skip[k] >= lim)) delete nx.skip[k]; });
+  if (Object.keys(nx.mute).length || Object.keys(nx.skip).length) all[alWho()] = nx; else delete all[alWho()];
+  saveCfg({ ...cfg, alertsOff: all });
+}
+let alReg = [], menuAlert = null; // avisos en pantalla (el botón ⋯ los busca por número); se vacía en cada Inicio
+const alMore = a => { alReg.push(a); return `<button type="button" class="almore" aria-label="Opciones de este aviso" onclick="event.stopPropagation();alertMenu(${alReg.length - 1})"><i class="icon-ellipsis"></i></button>`; };
+const alertSkip = k => setAlertPrefs(p => { p.skip[k] = today(); });
+function alertsHTML() {
+  const all = homeAlerts(), p = alertPrefs(), vis = all.filter(a => alertOn(a, p));
+  const pend = vis.filter(a => a.k.startsWith('pend:')), soon = vis.filter(a => a.k.startsWith('soon:'));
+  const list = vis.filter(a => !(a.k.startsWith('pend:') && pend.indexOf(a) >= 4) && !(a.k.startsWith('soon:') && soon.indexOf(a) >= 4));
+  const html = list.map(a => { const j = a.h.lastIndexOf('%M%'); return a.h.slice(0, j) + alMore(a) + a.h.slice(j + 3); }); // el último %M% (un nombre podría traer ese texto)
+  if (pend.length > 4) html.splice(4, 0, `<button class="link" onclick="go('rec')">Ver los ${pend.length} pendientes</button>`);
+  const hid = all.length - vis.length;
+  if (html.length && hid) html.push(`<button class="link alhid" onclick="setSub='avisos';go('set')"><i class="icon-bell-off"></i> ${hid} aviso${hid > 1 ? 's' : ''} oculto${hid > 1 ? 's' : ''}</button>`);
+  return html.join('');
+}
+function alertMenu(i) {
+  const a = menuAlert = alReg[i]; if (!a) return; const tt = a.mt || a.t;
+  dlg.innerHTML = `<div class="sheethd">${circ(tt, a.ic)}<div><b>${esc(tt)}</b><small>${a.ins ? 'Para ti' : 'Pendientes y alertas'}</small></div><button class="iconbtn" aria-label="Cerrar" onclick="dlg.close()"><i class="icon-x"></i></button></div>
+<div class="list almenu"><button type="button" class="lrow" onclick="alertAct('skip')">${circ('ignorar', 'clock')}<div><b>Ignorar por ahora</b><small>${esc(a.ig)}</small></div></button>
+<button type="button" class="lrow" onclick="alertAct('mute')">${circ('silenciar', 'bell-off')}<div><b>No volver a avisarme</b><small>${esc(a.l)}. Lo puedes reactivar en Ajustes → Avisos de Inicio.</small></div></button></div>
+<p class="mini" style="margin:10px 2px 0">${alWho() == '_' ? 'Se guarda en este teléfono.' : `Solo para ${esc(alWho())}: a los demás del hogar les sigue saliendo.`}</p>
+<div class="seg" style="margin-top:12px"><button type="button" onclick="dlg.close()">Cancelar</button></div>`;
+  dlgShow();
+}
+function alertAct(how) {
+  const a = menuAlert; if (!a) return; const before = alertPrefs(); menuAlert = null;
+  if (a.snooze && how == 'skip') { dlg.close(); return a.snooze(); } // el respaldo tiene su propio “luego”
+  setAlertPrefs(p => { if (how == 'mute') p.mute[a.r] = { l: a.l, d: today() }; else p.skip[a.k] = today(); });
+  if (dlg.open) dlg.close();
+  toast(how == 'mute' ? 'No te volveremos a avisar de esto' : 'Aviso ignorado', { action: 'Deshacer', onAction: () => { setAlertPrefs(p => { p.mute = { ...before.mute }; p.skip = { ...before.skip }; }); toast('Listo, el aviso volvió', { kind: 'ok' }); } });
+}
+function unmuteAlert(r) { // también quita los “ignorar” que tenga ese mismo aviso ahora, para que salga de verdad
+  const now = [...homeAlerts(), ...insights(true)].filter(a => a.r == r);
+  setAlertPrefs(p => { delete p.mute[r]; now.forEach(a => delete p.skip[a.k]); }); toast('Te volveremos a avisar', { kind: 'ok' });
+}
+function unskipAlert(k) { setAlertPrefs(p => { delete p.skip[k]; }); toast('El aviso volvió a Inicio', { kind: 'ok' }); }
+async function resetAlerts() {
+  if (!(await ask('Todos los avisos que ignoraste o silenciaste vuelven a salir en Inicio.', { title: '¿Volver a mostrar todo?', ok: 'Mostrar todo' }))) return;
+  setAlertPrefs(p => { p.mute = {}; p.skip = {}; }); toast('Todos los avisos están activos', { kind: 'ok' });
+}
+// Ajustes → Avisos de Inicio
+function alertsSettingsHTML() {
+  const p = alertPrefs(), muted = Object.entries(p.mute).sort((x, y) => (y[1].d || '').localeCompare(x[1].d || ''));
+  const cur = [...homeAlerts(), ...insights(true)], ign = cur.filter(a => !p.mute[a.r] && p.skip[a.k]);
+  const who = alWho() == '_' ? 'Se guarda en este teléfono.' : `Esto es solo para <b>${esc(alWho())}</b>: a los demás del hogar les siguen saliendo sus avisos.`;
+  return `<div class="card alset"><h2><i class="icon-bell-off"></i> Silenciados</h2><p class="mini" style="margin:0 0 6px">${who} En cada aviso de Inicio toca <b>⋯</b> para ignorarlo o silenciarlo.</p>
+${muted.length ? muted.map(([r, m]) => `<div class="row">${circ(m.l || r, 'bell-off')}<div><b>${esc(m.l || r)}</b><small>Silenciado el ${fdate(m.d, 1)}</small></div><button onclick="unmuteAlert(${jsAttr(r)})">Reactivar</button></div>`).join('') : '<p class="mini" style="margin:6px 0 0">No has silenciado ningún aviso.</p>'}</div>
+<div class="card alset"><h2><i class="icon-clock"></i> Ignorados por ahora</h2>
+${ign.length ? ign.map(a => `<div class="row">${circ(a.mt || a.t, a.ic)}<div><b>${esc(a.mt || a.t)}</b><small>${esc(a.ig)}</small></div><button onclick="unskipAlert(${jsAttr(a.k)})">Mostrar</button></div>`).join('') : '<p class="mini" style="margin:0">No hay avisos ignorados en este momento.</p>'}</div>
+${muted.length || ign.length ? '<div class="add" style="justify-content:center"><button class="link" onclick="resetAlerts()"><i class="icon-rotate-ccw"></i> Volver a mostrar todo</button></div>' : ''}`;
 }
 function renderHome(app) {
+  alReg = [];
   const td = today(), ym = td.slice(0, 7), me = myPerson();
   const cards = {
     saldo: () => {
@@ -435,6 +511,7 @@ const SET_SECTIONS = [
   ['nube', 'cloud', 'Nube y hogar', () => { const C = window.Cloud; return !C || !C.enabled ? 'Sin configurar: datos solo en este teléfono' : C.hid ? 'Sincronizado con tu hogar' : C.user ? 'Conectado, sin hogar' : 'Sin iniciar sesión'; }],
   ['seguridad', 'lock', 'Seguridad y privacidad', () => (lockCfg() ? 'PIN activado' + (bioId() ? ' · Face ID / huella' : '') : 'Sin bloqueo')],
   ['apariencia', 'palette', 'Apariencia', () => `${(PALETTES[palette] || {}).name || ''} · íconos ${(ICON_THEMES[iconTheme] || {}).name || ''}`],
+  ['avisos', 'bell', 'Avisos de Inicio', () => { const n = Object.keys(alertPrefs().mute).length; return n ? n + ' silenciado' + (n > 1 ? 's' : '') : 'Ignora o silencia los que no te sirven'; }],
   ['personas', 'users', 'Personas', () => cfg.people.join(', ')],
   ['categorias', 'tag', 'Categorías', () => cfg.cats.length + ' categorías'],
   ['atajos', 'zap', 'Atajos', () => (shortcuts().length ? shortcuts().length + ' atajos' : 'Botones para anotar con un toque')],
@@ -467,6 +544,7 @@ ${iconThemeHTML()}
 ${cloudOn() ? '' : `<label style="margin-top:10px">Este teléfono es de (se elige solo en “Quién”)<select onchange="setMyPerson(this.value);render()"><option value="">Nadie en particular</option>${opts(cfg.people, me)}</select></label>`}</div>`,
     categorias: () => `${catCard('Categorías de egreso', 'e')}${catCard('Categorías de ingreso', 'i')}<button style="width:100%" onclick="toolView='rules';go('tools')"><i class="icon-wand-sparkles"></i> Reglas automáticas de categoría</button>`,
     atajos: () => shortcutsSection(),
+    avisos: () => alertsSettingsHTML(),
     monedas: () => `<div class="card"><p class="mini" style="margin:0 0 8px">La tasa de referencia se usa para convertir tus saldos en otras monedas al patrimonio, y como sugerencia en los formularios.</p>
 ${cfg.cur.map(c => `<div class="row"><div><b>${c}</b><small>Última tasa usada: ${rateOf(c) && rateOf(c) != refRate(c) ? rateOf(c) : '—'}</small></div><input type="number" inputmode="decimal" step="0.0001" min="0" style="width:120px" placeholder="1 ${c} = ? DOP" value="${(cfg.rates || {})[c] || ''}" onchange="setRefRate('${c}',this.value)"><button class="d" aria-label="Quitar ${c}" onclick="rm('cur','${c}')"><i class="icon-x"></i></button></div>`).join('')}
 <div class="add" style="margin-top:8px"><input id="a-cur" placeholder="Código de 3 letras, ej: CAD" maxlength="3" autocapitalize="characters" onkeydown="if(event.key=='Enter')ad('cur')"><button class="p" onclick="ad('cur')">Agregar</button></div></div>`,

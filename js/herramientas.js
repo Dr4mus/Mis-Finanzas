@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['herramientas.js'] = '10.1.0';
+(window.__V = window.__V || {})['herramientas.js'] = '10.2.0';
 /* Mis finanzas — Herramientas: suscripciones detectadas, presupuesto sugerido, simulador de metas,
    lo mío / lo tuyo / lo nuestro, pegar alerta del banco, importar estado de cuenta, reglas de categoría,
    etiquetas y eventos, y cierre de mes. */
@@ -321,9 +321,10 @@ function markClosed(ym) { const c = deep(cfg); c.closed = { ...(c.closed || {}),
 // Aviso en Inicio los primeros días del mes si el anterior no está cerrado (solo si ya usas la app hace más de un mes)
 function closeAlert() {
   const td = today(), prev = addMonths(td.slice(0, 7), -1);
-  if (+td.slice(8, 10) > 10 || (cfg.closed || {})[prev] || !accs.some(a => a.openDate <= prev + '-01')) return '';
-  try { if (localStorage.getItem('fin_close_snooze') == prev) return ''; } catch (e) { }
-  return `<div class="alert bka">${circ('cierre', 'circle-check')}<div><b>Haz el cierre de ${ymLabel(prev)}</b><small>Compara tus saldos con los del banco (2 minutos).</small></div><div class="acts2"><button onclick="try{localStorage.setItem('fin_close_snooze','${prev}')}catch(e){};render()">Luego</button><button class="p" onclick="closeYm='${prev}';toolView='close';go('tools')">Hacer cierre</button></div></div>`;
+  if (+td.slice(8, 10) > 10 || (cfg.closed || {})[prev] || !accs.some(a => a.openDate <= prev + '-01')) return null;
+  try { if (localStorage.getItem('fin_close_snooze') == prev) return null; } catch (e) { } // “Luego” de la versión 10.1
+  return AL('close:' + prev, 'close', 'Recordatorio del cierre de mes', 'Cierre de ' + ymLabel(prev), 'circle-check', 'Vuelve a salir el mes que viene.',
+    `<div class="alert bka">${circ('cierre', 'circle-check')}<div><b>Haz el cierre de ${ymLabel(prev)}</b><small>Compara tus saldos con los del banco (2 minutos).</small></div>%M%<div class="acts2"><button onclick="alertSkip('close:${prev}')">Luego</button><button class="p" onclick="closeYm='${prev}';toolView='close';go('tools')">Hacer cierre</button></div></div>`);
 }
 
 // ============ por revisar (lo importado sin regla) ============
@@ -360,42 +361,49 @@ function revAll() { const L = revList(); bulkTxs(L.map(y => { const { rev, ...o 
 // Valor para poner dentro de onclick="…" sin romper el HTML
 const jsAttr = v => JSON.stringify(v).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '\\u003c');
 // ============ “Para ti”: lo más importante de tus números, en frases cortas ============
-function insights() {
-  const td = today(), ym = td.slice(0, 7), day = +td.slice(8, 10), out = [], mes = m => ymLabel(m).split(' ')[0];
+// Cada frase lleva k / r / l / ig como los avisos de Inicio (ver homeAlerts) para poder ignorarla o silenciarla.
+// insights(true) = todas, sin filtrar ni recortar (para Ajustes → Avisos de Inicio).
+const insTag = (o, k, r, l, ig) => Object.assign(o, { k, r, l: 'Para ti: ' + l, ig, ins: 1 });
+const unesc = s => String(s).replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+function insights(all) {
+  const td = today(), ym = td.slice(0, 7), day = +td.slice(8, 10), out = [], mes = m => ymLabel(m).split(' ')[0], nextM = 'Vuelve a salir el mes que viene.';
   const E = txs.filter(x => x.t == 'e' && x.d.slice(0, 7) == ym), spent = E.reduce((q, x) => q + x.v, 0);
   const cc = catCompare(ym);
   let hot = null;
   if (cc && cc.avgTot > 0 && day >= 5) {
     const tp = cc.expTot > 0 ? cc.vTot / cc.expTot : 1;
-    if (tp > 1.15 && cc.vTot - cc.expTot > 1000) out.push({ p: 90, ic: 'gauge', c: 'out', t: `Vas ${Math.round((tp - 1) * 100)}% por encima de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura del mes sueles llevar ${money(cc.expTot)}.`, go: "repTab='cat';go('rep')" });
-    else if (tp < 0.85 && cc.expTot - cc.vTot > 1000) out.push({ p: 40, ic: 'trending-down', c: 'in', t: `Vas ${Math.round((1 - tp) * 100)}% por debajo de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura sueles llevar ${money(cc.expTot)}. ¡Bien!`, go: "repTab='cat';go('rep')" });
+    if (tp > 1.15 && cc.vTot - cc.expTot > 1000) out.push(insTag({ p: 90, ic: 'gauge', c: 'out', t: `Vas ${Math.round((tp - 1) * 100)}% por encima de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura del mes sueles llevar ${money(cc.expTot)}.`, go: "repTab='cat';go('rep')" }, 'ins:pace:hi:' + ym, 'ins:pace', 'si vas por encima o por debajo de lo normal', nextM));
+    else if (tp < 0.85 && cc.expTot - cc.vTot > 1000) out.push(insTag({ p: 40, ic: 'trending-down', c: 'in', t: `Vas ${Math.round((1 - tp) * 100)}% por debajo de lo normal`, s: `Llevas ${money(cc.vTot)}; a esta altura sueles llevar ${money(cc.expTot)}. ¡Bien!`, go: "repTab='cat';go('rep')" }, 'ins:pace:lo:' + ym, 'ins:pace', 'si vas por encima o por debajo de lo normal', nextM));
     hot = cc.rows.filter(r => r.avg > 0 && r.pace > 1.3 && r.v - r.exp > Math.max(500, r.avg * 0.15)).sort((a, b) => (b.v - b.exp) - (a.v - a.exp))[0];
-    if (hot) out.push({ p: 80, ic: icoFor(hot.c, 'e'), c: 'warn', t: `${esc(hot.c)}: ${money(hot.v)} este mes`, s: `A esta altura sueles llevar ${money(hot.exp)} (${money(hot.avg)} en todo el mes).`, go: `F={c:${jsAttr(hot.c)}};pre('mes');go('hist')` });
+    if (hot) out.push(insTag({ p: 80, ic: icoFor(hot.c, 'e'), c: 'warn', t: `${esc(hot.c)}: ${money(hot.v)} este mes`, s: `A esta altura sueles llevar ${money(hot.exp)} (${money(hot.avg)} en todo el mes).`, go: `F={c:${jsAttr(hot.c)}};pre('mes');go('hist')` }, `ins:hot:${hot.c}:${ym}`, 'ins:hot:' + hot.c, `${hot.c} por encima de lo normal`, nextM));
   }
   // pagos de los próximos 7 días
   const lim = addDays(td, 7), ev = [...calendarEvents(ym), ...calendarEvents(addMonths(ym, 1))].filter(e => e.d > td && e.d <= lim && e.st != 'done' && (e.k == 'e' || e.k == 'pay' || e.k == 'loan' || (e.k == 'debt' && e.dir == 'owe')));
-  if (ev.length) { const tot = ev.reduce((q, e) => q + (e.v ? convert(e.v, e.cu || 'DOP', 'DOP', td) : 0), 0); out.push({ p: 70, ic: 'calendar-days', c: 'blue', t: tot ? `Esta semana pagas ${money(tot)}` : `Esta semana tienes ${ev.length} pago${ev.length > 1 ? 's' : ''}`, s: ev.slice(0, 3).map(e => esc(e.name)).join(', ') + (ev.length > 3 ? ` y ${ev.length - 3} más` : '') + '.', go: "go('plan')" }); }
+  if (ev.length) { const tot = ev.reduce((q, e) => q + (e.v ? convert(e.v, e.cu || 'DOP', 'DOP', td) : 0), 0); const wk = addDays(td, -((new Date(td + 'T12:00:00').getDay() + 6) % 7)); out.push(insTag({ p: 70, ic: 'calendar-days', c: 'blue', t: tot ? `Esta semana pagas ${money(tot)}` : `Esta semana tienes ${ev.length} pago${ev.length > 1 ? 's' : ''}`, s: ev.slice(0, 3).map(e => esc(e.name)).join(', ') + (ev.length > 3 ? ` y ${ev.length - 3} más` : '') + '.', go: "go('plan')" }, 'ins:week:' + wk, 'ins:week', 'pagos de la semana', 'Vuelve a salir la semana que viene.')); }
   // comercio que más se repite
   const bySub = {}; E.filter(x => x.sub).forEach(x => { const k = norm(x.sub); (bySub[k] = bySub[k] || { n: 0, v: 0, name: x.sub }).n++; bySub[k].v += x.v; });
   const fr = Object.values(bySub).filter(b => b.n >= 3).sort((a, b) => b.n - a.n || b.v - a.v)[0];
-  if (fr) out.push({ p: 50, ic: 'repeat', c: 'purple', t: `${esc(fr.name)}: ${fr.n} veces este mes`, s: `Suman ${money(fr.v)}.`, go: `F={q:${jsAttr(fr.name)}};go('hist')` });
+  if (fr) out.push(insTag({ p: 50, ic: 'repeat', c: 'purple', t: `${esc(fr.name)}: ${fr.n} veces este mes`, s: `Suman ${money(fr.v)}.`, go: `F={q:${jsAttr(fr.name)}};go('hist')` }, `ins:freq:${norm(fr.name)}:${ym}`, 'ins:freq:' + norm(fr.name), `cuántas veces vas a ${fr.name}`, nextM));
   // la categoría más grande del mes
-  if (!hot && spent > 0) { const g = Object.entries(grp(E, 'c')).sort((a, b) => b[1] - a[1])[0]; if (g) out.push({ p: 30, ic: icoFor(g[0], 'e'), c: 'pink', t: `${esc(g[0])} es tu mayor gasto del mes`, s: `${money(g[1])} · ${Math.round(g[1] / spent * 100)}% de lo que llevas gastado.`, go: "repTab='cat';go('rep')" }); }
+  if (!hot && spent > 0) { const g = Object.entries(grp(E, 'c')).sort((a, b) => b[1] - a[1])[0]; if (g) out.push(insTag({ p: 30, ic: icoFor(g[0], 'e'), c: 'pink', t: `${esc(g[0])} es tu mayor gasto del mes`, s: `${money(g[1])} · ${Math.round(g[1] / spent * 100)}% de lo que llevas gastado.`, go: "repTab='cat';go('rep')" }, `ins:big:${g[0]}:${ym}`, 'ins:big', 'tu mayor gasto del mes', nextM)); }
   // cómo cerró el mes pasado
   const pm = addMonths(ym, -1), pv = monthStats(pm);
-  if (pv.inc > 0 && day <= 12) out.push(pv.net < 0 ? { p: 85, ic: 'alert-triangle', c: 'out', t: `En ${mes(pm)} gastaste más de lo que entró`, s: `Saliste ${money(-pv.net)} abajo. Revisa tus topes en Presupuesto.`, go: "go('bud')" }
-    : { p: 35, ic: 'piggy-bank', c: 'in', t: `En ${mes(pm)} ahorraste ${pv.rate}%`, s: `Entraron ${money(pv.inc)} y salieron ${money(pv.exp)}.`, go: "repYm='" + pm + "';repTab='res';go('rep')" });
+  if (pv.inc > 0 && day <= 12) out.push(insTag(pv.net < 0 ? { p: 85, ic: 'alert-triangle', c: 'out', t: `En ${mes(pm)} gastaste más de lo que entró`, s: `Saliste ${money(-pv.net)} abajo. Revisa tus topes en Presupuesto.`, go: "go('bud')" }
+    : { p: 35, ic: 'piggy-bank', c: 'in', t: `En ${mes(pm)} ahorraste ${pv.rate}%`, s: `Entraron ${money(pv.inc)} y salieron ${money(pv.exp)}.`, go: "repYm='" + pm + "';repTab='res';go('rep')" }, 'ins:prev:' + pm, 'ins:prev', 'cómo cerró el mes pasado', nextM));
   // meta más cercana
   const fcs = activeGoals().map(g => ({ g, f: goalForecast(g) }));
   const won = fcs.find(x => x.f.reached);
-  if (won) out.push({ p: 75, ic: 'party-popper', c: 'in', t: `¡Lograste “${esc(won.g.name)}”! 🎉`, s: 'Márcala como cumplida para que deje de contar como activa.', go: "go('goal')" });
+  if (won) out.push(insTag({ p: 75, ic: 'party-popper', c: 'in', t: `¡Lograste “${esc(won.g.name)}”! 🎉`, s: 'Márcala como cumplida para que deje de contar como activa.', go: "go('goal')" }, 'ins:won:' + won.g.id, 'ins:goal:' + won.g.id, `la meta “${won.g.name}”`, 'No vuelve a salir para esta meta.'));
   const late = fcs.find(x => x.f.late && x.g.due);
-  if (late) out.push({ p: 60, ic: 'target', c: 'warn', t: `“${esc(late.g.name)}” va atrasada`, s: `Para el ${fdate(late.g.due, 1)} necesitas ${money(late.f.need)} cada ${PLAN_FREQ[late.f.pl.freq].u}.`, go: "go('goal')" });
+  if (late) out.push(insTag({ p: 60, ic: 'target', c: 'warn', t: `“${esc(late.g.name)}” va atrasada`, s: `Para el ${fdate(late.g.due, 1)} necesitas ${money(late.f.need)} cada ${PLAN_FREQ[late.f.pl.freq].u}.`, go: "go('goal')" }, `ins:late:${late.g.id}:${ym}`, 'ins:goal:' + late.g.id, `la meta “${late.g.name}”`, 'Vuelve a salir el mes que viene si todavía no llegas a tiempo.'));
   const gl = fcs.filter(x => !x.f.reached && (x.f.date || (x.f.pace && x.f.pace.monthsLeft > 0))).sort((a, b) => (a.f.date || addMonthsISO(today(), a.f.pace.monthsLeft)).localeCompare(b.f.date || addMonthsISO(today(), b.f.pace.monthsLeft)))[0];
-  if (gl && gl != late) out.push({ p: 25, ic: 'target', c: 'teal', t: gl.f.date ? `“${esc(gl.g.name)}”: llegas ~${fdate(gl.f.date, 1)}` : `“${esc(gl.g.name)}”: llegas en ~${gl.f.pace.monthsLeft} ${gl.f.pace.monthsLeft == 1 ? 'mes' : 'meses'}`, s: `Vas por ${gl.f.p.pct}%${gl.f.pl ? ` con ${money(gl.f.pl.amount)} ${PLAN_FREQ[gl.f.pl.freq].l}` : ` al ritmo de ~${money(gl.f.pace.perMonth)} al mes`}.`, go: "go('goal')" });
-  return out.sort((a, b) => b.p - a.p).slice(0, 3);
+  if (gl && gl != late) out.push(insTag({ p: 25, ic: 'target', c: 'teal', t: gl.f.date ? `“${esc(gl.g.name)}”: llegas ~${fdate(gl.f.date, 1)}` : `“${esc(gl.g.name)}”: llegas en ~${gl.f.pace.monthsLeft} ${gl.f.pace.monthsLeft == 1 ? 'mes' : 'meses'}`, s: `Vas por ${gl.f.p.pct}%${gl.f.pl ? ` con ${money(gl.f.pl.amount)} ${PLAN_FREQ[gl.f.pl.freq].l}` : ` al ritmo de ~${money(gl.f.pace.perMonth)} al mes`}.`, go: "go('goal')" }, `ins:next:${gl.g.id}:${ym}`, 'ins:goal:' + gl.g.id, `la meta “${gl.g.name}”`, nextM));
+  out.forEach(x => { x.mt = unesc(x.t); }); // título sin HTML para la hoja de opciones y Ajustes
+  if (all) return out;
+  const p = alertPrefs();
+  return out.filter(x => alertOn(x, p)).sort((a, b) => b.p - a.p).slice(0, 3);
 }
 function insightsCard() {
   const L = insights(); if (!L.length) return '';
-  return `<div class="card"><h2><i class="icon-sparkles"></i> Para ti</h2>${L.map(x => `<div class="ins" role="button" onclick="${x.go}"><div class="circ tint" style="--c:var(--${x.c})"><i class="icon-${x.ic}"></i></div><div><b>${x.t}</b><small>${x.s}</small></div><i class="icon-chevron-right"></i></div>`).join('')}</div>`;
+  return `<div class="card"><h2><i class="icon-sparkles"></i> Para ti</h2>${L.map(x => `<div class="ins" role="button" onclick="${x.go}"><div class="circ tint" style="--c:var(--${x.c})"><i class="icon-${x.ic}"></i></div><div><b>${x.t}</b><small>${x.s}</small></div>${alMore(x)}</div>`).join('')}</div>`;
 }

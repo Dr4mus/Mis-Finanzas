@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['forms.js'] = '10.1.0';
+(window.__V = window.__V || {})['forms.js'] = '10.2.0';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
 // Un solo control para el tipo: Egreso · Ingreso · Transferir · Meta
@@ -581,6 +581,7 @@ function svPerson(e) {
 }
 function renamePerson(old, n) {
   const c = deep(cfg); c.people = c.people.map(p => p == old ? n : p); if (!c.people.includes(n)) c.people.push(n);
+  if (c.alertsOff && c.alertsOff[old] && !c.alertsOff[n]) { c.alertsOff[n] = c.alertsOff[old]; delete c.alertsOff[old]; } // sus avisos silenciados se van con el nombre
   bulkTxs(txs.filter(x => x.w == old || x.byName == old || x.to == old || x.split == 'for:' + old).map(x => ({ ...x, w: x.w == old ? n : x.w, byName: x.byName == old ? n : x.byName, ...(x.to == old ? { to: n } : {}), ...(x.split == 'for:' + old ? { split: 'for:' + n } : {}) })));
   recs.filter(r => r.w == old).forEach(r => saveRec({ ...r, w: n }, { noRender: true }));
   if (myPerson() == old) { setMyPerson(n); if (cloudOn() && window.Cloud.setMyName) window.Cloud.setMyName(n); }

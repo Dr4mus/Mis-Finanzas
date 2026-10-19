@@ -1,7 +1,7 @@
 /* Service worker: permite abrir la app sin internet.
    Siempre pregunta primero al servidor por la versión más nueva (sin usar copias viejas del navegador);
    solo si no hay internet usa la copia guardada. Sube CACHE al publicar una versión nueva. */
-const CACHE = 'mis-finanzas-v10.1.0';
+const CACHE = 'mis-finanzas-v10.2.0';
 const SHELL = ['./', 'index.html', 'css/app.css', 'css/marca.css', 'css/iconos-suave.css', 'css/iconos-relleno.css', 'css/iconos-duotono.css', 'css/iconos-material.css', 'js/config.js', 'js/marca.js', 'js/core.js', 'js/ui.js', 'js/screens.js', 'js/forms.js', 'js/plan.js', 'js/extras.js', 'js/iconos.js', 'js/deudas.js', 'js/herramientas.js', 'js/lock.js', 'js/sync-ui.js', 'js/cloud.js',
   'vendor/chart.umd.js', 'vendor/firebase.js', 'vendor/xlsx.mini.min.js', 'manifest.webmanifest', 'icons/favicon.png', 'icons/escudo.webp', 'icons/escudo-mini.webp', 'icons/icon-192.png', 'icons/apple-touch-icon.png'];
 self.addEventListener('install', e => e.waitUntil(caches.open(CACHE).then(c => Promise.all(SHELL.map(u => fetch(u, { cache: 'no-cache' }).then(r => r.ok && c.put(u, r)).catch(() => { }))))));

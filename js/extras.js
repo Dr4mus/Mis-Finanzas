@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['extras.js'] = '10.1.0';
+(window.__V = window.__V || {})['extras.js'] = '10.2.0';
 /* Mis finanzas — atajos, Inicio personalizable, bienvenida, papelera y recordatorio de respaldo. */
 
 // ============ atajos de movimientos frecuentes ============
@@ -123,10 +123,12 @@ function backupDue() {
   return n - last > 30 * 864e5;
 }
 function backupAlert() {
-  if (!backupDue()) return '';
+  if (!backupDue()) return null;
   let last = 0; try { last = +localStorage.getItem('fin_lastbk') || 0; } catch (e) { }
   const txt = last ? `Tu último respaldo fue hace ${Math.floor((Date.now() - last) / 864e5)} días.` : 'Aún no has descargado un respaldo.';
-  return `<div class="alert bka">${circ('respaldo', 'download')}<div><b>Toca hacer un respaldo</b><small>${txt} Guárdalo en tu correo o en la nube.</small></div><div class="acts2"><button onclick="snoozeBackup()">Luego</button><button class="p" onclick="bk()">Descargar</button></div></div>`;
+  const a = AL('backup', 'backup', 'Recordatorio de respaldo', 'Toca hacer un respaldo', 'download', 'Te lo recuerdo en una semana.',
+    `<div class="alert bka">${circ('respaldo', 'download')}<div><b>Toca hacer un respaldo</b><small>${txt} Guárdalo en tu correo o en la nube.</small></div>%M%<div class="acts2"><button onclick="snoozeBackup()">Luego</button><button class="p" onclick="bk()">Descargar</button></div></div>`);
+  a.snooze = snoozeBackup; return a;
 }
 function snoozeBackup() { try { localStorage.setItem('fin_bk_snooze', String(Date.now() + 7 * 864e5)); } catch (e) { } render(); toast('Te lo recuerdo en una semana'); }
 

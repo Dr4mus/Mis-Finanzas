@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['plan.js'] = '10.1.0';
+(window.__V = window.__V || {})['plan.js'] = '10.2.0';
 /* Mis finanzas — Planificar: te alcanza, saldo proyectado, comparación con tu promedio,
    calendario de pagos y recordatorios para el calendario del teléfono. */
 let planDays = 30, planDaily = true, calYm = today().slice(0, 7), calDay = '';

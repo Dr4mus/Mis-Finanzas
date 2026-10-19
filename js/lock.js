@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['lock.js'] = '10.1.0';
+(window.__V = window.__V || {})['lock.js'] = '10.2.0';
 /* Mis finanzas — bloqueo con PIN y Face ID / huella (WebAuthn del propio teléfono).
    Es un bloqueo local de la app en este teléfono; los datos de la nube además requieren tu cuenta. */
 const LOCK = { key: 'fin_pin', bio: 'fin_bio', after: 'fin_lock_after' };

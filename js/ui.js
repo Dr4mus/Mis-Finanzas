@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['ui.js'] = '10.1.0';
+(window.__V = window.__V || {})['ui.js'] = '10.2.0';
 /* Mis finanzas — utilidades de interfaz, acciones (guardar/borrar) y navegación. */
 const dlg = document.getElementById('dlg');
 const $ = id => document.getElementById(id);

@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '10.1.0';
+(window.__V = window.__V || {})['core.js'] = '10.2.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -101,12 +101,25 @@ function cleanTx(x) {
   if (x.tags != null) o.tags = (Array.isArray(x.tags) ? x.tags : []).map(String).filter(Boolean).slice(0, 10);
   return o;
 }
+// Avisos de Inicio ignorados o silenciados, por persona: { nombre: { mute: { regla: { l, d } }, skip: { aviso: 'AAAA-MM-DD' } } }
+function cleanAlertsOff(o) {
+  const out = {}; if (!o || typeof o != 'object' || Array.isArray(o)) return out;
+  for (const [who, v] of Object.entries(o).slice(0, 40)) {
+    if (!v || typeof v != 'object') continue;
+    const mute = {}, skip = {};
+    Object.entries(v.mute && typeof v.mute == 'object' ? v.mute : {}).slice(0, 300).forEach(([k, m]) => { if (k && m && typeof m == 'object') mute[k] = { l: String(m.l || '').slice(0, 160), d: okDate(m.d) ? m.d : '' }; });
+    Object.entries(v.skip && typeof v.skip == 'object' ? v.skip : {}).slice(0, 600).forEach(([k, d]) => { if (k && okDate(d)) skip[k] = d; });
+    if (Object.keys(mute).length || Object.keys(skip).length) out[who] = { mute, skip };
+  }
+  return out;
+}
 function cleanState(o) {
   const arr = (a, f) => (Array.isArray(a) ? a.map(f).filter(Boolean) : []);
   const c = { ...fresh(), ...(o.cfg || {}) };
   c.cur = (c.cur || []).filter(x => CUR_RE.test(x) && x != 'DOP');
   c.cats = (c.cats || []).filter(x => x && x.n && (x.t == 'i' || x.t == 'e')).map(x => ({ ...x, icon: ICONS.includes(x.icon) ? x.icon : 'tag' }));
   c.shortcuts = (Array.isArray(c.shortcuts) ? c.shortcuts : []).filter(x => x && ID_RE.test(String(x.id || '')) && x.name && (x.t == 'i' || x.t == 'e')).map(x => ({ ...x, a: x.a ? num(x.a) : null, cu: CUR_RE.test(x.cu || '') ? x.cu : 'DOP' }));
+  c.alertsOff = cleanAlertsOff(c.alertsOff);
   return {
     cfg: c, cfgT: num(o.cfgT),
     txs: arr(o.txs, cleanTx),
