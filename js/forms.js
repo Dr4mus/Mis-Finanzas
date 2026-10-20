@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['forms.js'] = '10.2.0';
+(window.__V = window.__V || {})['forms.js'] = '10.3.0';
 /* Mis finanzas — formularios y diálogos. */
 const accOpt = (a, s, d) => `<option value="${a.id}"${a.id == s ? ' selected' : ''}>${esc(a.name)} (${a.currency}) · ${money(acctBalance(a, d), a.currency)}${earm(a) > 0 ? ' · libre ' + money(freeBal(a, d), a.currency) : ''}</option>`;
 // Un solo control para el tipo: Egreso · Ingreso · Transferir · Meta
@@ -10,10 +10,20 @@ function mvTabs(c) {
 const footer = (id, delFn, extra = '') => `<div class="seg"><button type="button" onclick="dlg.close()">Cancelar</button><button class="p">Guardar</button></div>${id ? `<div class="seg sm">${extra}<button type="button" class="d" onclick="${delFn}"><i class="icon-trash-2"></i> Borrar</button></div>` : ''}`;
 // Saldo insuficiente: avisa, pero deja guardar (por si olvidaste anotar un ingreso)
 async function enoughOrAsk(acc, amount, date, exceptId) {
+  if (acc && isCard(acc) && +acc.limit > 0) return creditOrAsk(acc, amount, date, exceptId);
   if (!acc || isDebtAcc(acc)) return true;
   const av = exceptId ? without(exceptId, () => freeBal(acc, date)) : freeBal(acc, date);
   if (amount <= av + 0.005) return true;
   return ask(`En “${acc.name}” quedan ${money(av, acc.currency)} libres${earm(acc) > 0 ? ' (el resto está reservado para metas)' : ''}. Si guardas, la cuenta quedará en negativo.\n\nSi el saldo real es mayor, corrígelo luego con “Ajustar saldo”.`, { title: 'Saldo insuficiente', ok: 'Guardar igual' });
+}
+// Tarjeta o línea con límite: avisa si el gasto pasa el límite o el sobregiro permitido (deja guardar igual)
+async function creditOrAsk(acc, amount, date, exceptId) {
+  const ci = exceptId ? without(exceptId, () => creditInfo(acc, date)) : creditInfo(acc, date);
+  if (!ci || amount <= ci.avail + 0.005) return true;
+  const cu = acc.currency, w = cardWord(acc);
+  if (amount <= ci.room + 0.005) return ask(`Con este gasto la ${w} “${acc.name}” pasa su límite de ${money(ci.limit, cu)} por ${money(round2(amount - Math.max(ci.avail, 0)), cu)} y entra en sobregiro.\n\nTe ${ci.room - amount >= 0.005 ? 'quedarían ' + money(round2(ci.room - amount), cu) : 'quedaría 0'} de los ${money(ci.over, cu)} de sobregiro permitido.`, { title: 'Pasas el límite', ok: 'Guardar igual' });
+  return ask(ci.over > 0 ? `Con este gasto la ${w} “${acc.name}” pasa también el sobregiro permitido: el máximo es ${money(ci.max, cu)} y quedarías debiendo ${money(round2(ci.debt + amount), cu)}. El banco podría rechazarlo o cobrarte cargos.\n\nSi el límite cambió, edítalo en la cuenta.`
+    : `Con este gasto la ${w} “${acc.name}” pasa su límite de ${money(ci.limit, cu)}: quedarías debiendo ${money(round2(ci.debt + amount), cu)} y no tiene sobregiro permitido. El banco podría rechazarlo.\n\nSi el límite cambió, edítalo en la cuenta.`, { title: ci.over > 0 ? 'Pasas el sobregiro permitido' : 'Pasas el límite', ok: 'Guardar igual', danger: true });
 }
 const beforeOpen = (acc, d) => acc && acc.openDate && d < acc.openDate ? fail(`La cuenta “${acc.name}” empieza el ${fdate(acc.openDate, 1)}. Cambia la fecha o la fecha inicial de la cuenta.`) || true : false;
 
@@ -109,13 +119,25 @@ let am = {};
 const LOAN_KINDS = ['Hipoteca', 'Vehículo', 'Personal', 'Estudios', 'Negocio', 'Otro'];
 function openAccForm(id, preset) {
   const x = { ...(accs.find(a => a.id == id) || {}), ...(preset || {}) }, loan = x.type == 'Préstamo';
-  am = { id: x.id, name: x.name || '', type: x.type || cfg.accTypes[0], currency: x.currency || 'DOP', note: x.note || '', openDate: x.openDate || today(), openBalance: x.openBalance ?? '', cutDay: x.cutDay || '', payDay: x.payDay || '', rate: x.rate ?? '', minPay: x.minPay ?? '', owner: x.owner || '', last4: x.last4 || '',
+  am = { id: x.id, name: x.name || '', type: x.type || cfg.accTypes[0], currency: x.currency || 'DOP', note: x.note || '', openDate: x.openDate || today(), openBalance: x.openBalance ?? '', cutDay: x.cutDay || '', payDay: x.payDay || '', rate: x.rate ?? '', minPay: x.minPay ?? '', owner: x.owner || '', last4: x.last4 || '', limit: x.limit ?? '', over: x.over ?? '', overPct: !!x.overPct,
     lender: x.lender || '', loanKind: x.loanKind || 'Personal', principal: x.principal ?? '', term: x.term ?? '', payment: x.payment ?? '', firstPay: x.firstPay || '', owedNow: loan && x.openBalance != null ? Math.abs(x.openBalance) : '' };
   drawAccForm();
 }
+// Límite de crédito y sobregiro permitido (tarjetas y líneas de crédito)
+function creditFields(f) {
+  const lim = parseFloat(f.limit), ov = parseFloat(f.over), ovAmt = ov > 0 ? (f.overPct ? lim * ov / 100 : ov) : 0;
+  const cur = f.currency || 'DOP', prev = f.id && accs.find(a => a.id == f.id), debt = prev ? Math.max(0, -acctBalance(prev)) : 0;
+  return `<div class="credbox"><b class="credt"><i class="icon-gauge"></i> Límite y sobregiro <small class="mut">(opcional)</small></b>
+<label>Límite de crédito<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(f.limit)}" oninput="am.limit=this.value" onchange="drawAccForm()" placeholder="Ej: 100000"></label>
+<div class="two"><label>Sobregiro permitido<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(f.over)}" oninput="am.over=this.value" onchange="drawAccForm()" placeholder="${f.overPct ? 'Ej: 10' : 'Ej: 5000'}"></label>
+<label>En<select onchange="am.overPct=this.value=='pct';drawAccForm()"><option value="amt"${f.overPct ? '' : ' selected'}>Monto (${cur})</option><option value="pct"${f.overPct ? ' selected' : ''}>% del límite</option></select></label></div>
+${lim > 0 ? `<p class="mini" style="margin:0">Puedes usar hasta <b>${money(lim + ovAmt, cur)}</b>${ovAmt > 0 ? ` (límite ${money(lim, cur)} + sobregiro ${money(ovAmt, cur)})` : ''}.${prev ? ` Hoy debes ${money(debt, cur)}: te ${lim - debt >= 0 ? 'quedan ' + money(lim - debt, cur) + ' del límite' : 'pasaste del límite por ' + money(debt - lim, cur)}.` : ''}</p>`
+    : '<p class="mini" style="margin:0">Con el límite la app te dice cuánto te queda y te avisa antes de pasarte. El sobregiro es lo que el banco te deja pasar por encima del límite.</p>'}</div>`;
+}
 function drawAccForm() {
-  const f = am, cu = [...new Set(['DOP', f.currency, ...cfg.cur])], card = f.type == 'Tarjeta de crédito', loan = f.type == 'Préstamo';
+  const f = am, cu = [...new Set(['DOP', f.currency, ...cfg.cur])], card = CREDIT_TYPES.includes(f.type), line = f.type == 'Línea de crédito', loan = f.type == 'Préstamo';
   const types = [...new Set([...cfg.accTypes, 'Préstamo'])];
+  if (!types.includes('Línea de crédito')) types.splice(types.includes('Tarjeta de crédito') ? types.indexOf('Tarjeta de crédito') + 1 : types.length - 1, 0, 'Línea de crédito'); // tipo nuevo (10.3) también para quien ya tenía la lista guardada
   const days = (v, k) => `<select onchange="am.${k}=this.value"><option value="">—</option>${[...Array(31)].map((_, i) => `<option value="${i + 1}"${+v == i + 1 ? ' selected' : ''}>${i + 1}</option>`).join('')}</select>`;
   const est = loan && +f.principal > 0 && +f.term > 0 ? pmt(+f.principal, +f.rate || 0, +f.term) : 0;
   dlg.innerHTML = `<form onsubmit="return svAcc(event)"><h2>${f.id ? (loan ? 'Editar préstamo' : 'Editar cuenta') : (loan ? 'Nuevo préstamo' : 'Nueva cuenta')}</h2>
@@ -129,11 +151,12 @@ ${est && !f.payment ? `<button type="button" class="link" style="justify-self:st
 <div class="two"><label>Día de pago${days(f.payDay, 'payDay')}</label><label>Primera cuota (opcional)<input type="date" value="${esc(f.firstPay)}" onchange="am.firstPay=this.value"></label></div>
 <div class="two"><label>¿Cuánto debes hoy?<input type="number" inputmode="decimal" step="0.01" min="0" required value="${esc(f.owedNow)}" oninput="am.owedNow=this.value" placeholder="Saldo pendiente"></label><label>Fecha de ese saldo<input type="date" required value="${esc(f.openDate)}" onchange="am.openDate=this.value"></label></div>
 <p class="note">Escribe lo que debes <b>hoy</b> (lo dice el estado de cuenta del banco), no el monto original. Cada vez que pagues una cuota desde la app, la deuda baja sola y la app separa el interés.</p>`
-    : `${card ? `<div class="two"><label>Día de corte${days(f.cutDay, 'cutDay')}</label><label>Día límite de pago${days(f.payDay, 'payDay')}</label></div><p class="mini" style="margin:0">Con estas fechas la app te avisa cuánto pagar y cuándo vence.</p>
+    : `${card ? `<div class="two"><label>Día de corte${line ? ' (opcional)' : ''}${days(f.cutDay, 'cutDay')}</label><label>Día límite de pago${line ? ' (opcional)' : ''}${days(f.payDay, 'payDay')}</label></div><p class="mini" style="margin:0">Con estas fechas la app te avisa cuánto pagar y cuándo vence.</p>
+${creditFields(f)}
 <div class="two"><label>Tasa anual (%) (opcional)<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(f.rate)}" oninput="am.rate=this.value" placeholder="Ej: 60"></label><label>Pago mínimo (opcional)<input type="number" inputmode="decimal" step="0.01" min="0" value="${esc(f.minPay)}" oninput="am.minPay=this.value"></label></div><p class="mini" style="margin:0">La tasa y el pago mínimo se usan en el plan para salir de deudas.</p>` : ''}
 <div class="two"><label>Saldo inicial<input type="number" inputmode="decimal" step="0.01" required value="${esc(f.openBalance)}" oninput="am.openBalance=this.value"></label>
 <label>Fecha del saldo<input type="date" required value="${esc(f.openDate)}" onchange="am.openDate=this.value"></label></div>
-<p class="note">${card ? 'En tarjetas, si ya debes algo, escribe el saldo en negativo (ej: -15000). ' : ''}${f.id ? 'Para corregir el saldo de hoy sin tocar el historial, usa “Ajustar saldo”.' : ''}</p>`}
+<p class="note">${card ? `En ${line ? 'líneas de crédito' : 'tarjetas'}, si ya debes algo, escribe el saldo en negativo (ej: -15000). ` : ''}${f.id ? 'Para corregir el saldo de hoy sin tocar el historial, usa “Ajustar saldo”.' : ''}</p>`}
 ${!loan ? `<label>Últimos 4 dígitos (opcional, para leer alertas del banco)<input inputmode="numeric" maxlength="4" pattern="[0-9]{4}" value="${esc(f.last4)}" oninput="am.last4=this.value" placeholder="1234"></label>` : ''}
 ${cfg.people.length > 1 ? `<label>¿De quién es?<select onchange="am.owner=this.value"><option value="">Del hogar (de todos)</option>${opts(cfg.people, f.owner)}</select></label>` : ''}
 <input value="${esc(f.note)}" oninput="am.note=this.value" placeholder="Nota (opcional)" aria-label="Nota">
@@ -142,14 +165,21 @@ ${footer(f.id, `delAcc('${f.id}')`)}</form>`;
 }
 async function svAcc(e) {
   e.preventDefault(); const f = am; if (!f.name.trim()) return false;
-  const prev = f.id && accs.find(a => a.id == f.id), loan = f.type == 'Préstamo', card = f.type == 'Tarjeta de crédito';
+  const prev = f.id && accs.find(a => a.id == f.id), loan = f.type == 'Préstamo', card = CREDIT_TYPES.includes(f.type);
   if (f.id && goals.some(g => g.accId == f.id) && (f.currency != 'DOP' || card || loan)) return fail('Esta cuenta tiene metas atadas: debe seguir siendo una cuenta en pesos y no una tarjeta ni un préstamo.');
   let b;
   if (loan) { const o = parseFloat(f.owedNow); if (!(o >= 0)) return fail('Escribe cuánto debes hoy (puede ser 0).'); b = -o; if (!(+f.payDay >= 1)) return fail('Elige el día de pago de la cuota.'); }
   else { b = parseFloat(f.openBalance); if (isNaN(b)) return fail('Escribe el saldo inicial (puede ser 0).'); }
   if (prev && prev.currency != f.currency && txs.some(x => x.accId == f.id || x.accIdTo == f.id) && !(await ask(`Esta cuenta ya tiene movimientos en ${prev.currency}. Si cambias a ${f.currency}, los montos viejos se leerán en ${f.currency}.`, { title: '¿Cambiar la moneda?', ok: 'Cambiar' }))) return false;
   const o = { id: f.id, name: f.name.trim(), type: f.type, currency: f.currency, note: f.note.trim(), openDate: f.openDate, openBalance: b, owner: f.owner || '', last4: /^\d{4}$/.test(f.last4 || '') ? f.last4 : '' };
-  if (card) { o.cutDay = +f.cutDay || null; o.payDay = +f.payDay || null; o.rate = parseFloat(f.rate) >= 0 ? parseFloat(f.rate) : null; o.minPay = parseFloat(f.minPay) > 0 ? parseFloat(f.minPay) : null; }
+  if (card) {
+    o.cutDay = +f.cutDay || null; o.payDay = +f.payDay || null; o.rate = parseFloat(f.rate) >= 0 ? parseFloat(f.rate) : null; o.minPay = parseFloat(f.minPay) > 0 ? parseFloat(f.minPay) : null;
+    const lim = parseFloat(f.limit), ov = parseFloat(f.over);
+    if (String(f.limit).trim() !== '' && !(lim > 0)) return fail('El límite de crédito debe ser mayor que cero (o déjalo vacío).');
+    if (ov > 0 && !(lim > 0)) return fail('Para poner el sobregiro, primero escribe el límite de crédito.');
+    if (f.overPct && ov > 100) return fail('El sobregiro en porcentaje no puede pasar de 100%.');
+    o.limit = lim > 0 ? round2(lim) : null; o.over = ov > 0 ? round2(ov) : null; o.overPct = !!(o.over && f.overPct);
+  }
   if (loan) {
     const est = +f.principal > 0 && +f.term > 0 ? pmt(+f.principal, +f.rate || 0, +f.term) : 0;
     Object.assign(o, { lender: f.lender.trim(), loanKind: f.loanKind, principal: parseFloat(f.principal) > 0 ? parseFloat(f.principal) : Math.abs(b), rate: parseFloat(f.rate) >= 0 ? parseFloat(f.rate) : 0, term: parseInt(f.term) > 0 ? parseInt(f.term) : null, payment: parseFloat(f.payment) > 0 ? parseFloat(f.payment) : est || null, payDay: +f.payDay, firstPay: f.firstPay || '' });
@@ -187,7 +217,7 @@ function openTransferForm(id, toId, amount) {
   if (x) trform = { id: x.id, date: x.d, from: x.accId, to: x.accIdTo, amount: x.a, amountTo: x.aTo, note: x.n || '', cr: x.cr, rec: x.rec };
   else {
     const to = toId || accs[1].id, from = (accs.find(a => a.id != to && !isDebtAcc(a)) || accs.find(a => a.id != to)).id;
-    trform = { date: today(), from, to, amount: amount || '', amountTo: '', note: toId ? 'Pago de tarjeta' : '' };
+    trform = { date: today(), from, to, amount: amount || '', amountTo: '', note: toId ? 'Pago de ' + cardWord(accs.find(x => x.id == toId)) : '' };
   }
   drawTransferForm();
 }

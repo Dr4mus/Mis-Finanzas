@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['plan.js'] = '10.2.0';
+(window.__V = window.__V || {})['plan.js'] = '10.3.0';
 /* Mis finanzas — Planificar: te alcanza, saldo proyectado, comparación con tu promedio,
    calendario de pagos y recordatorios para el calendario del teléfono. */
 let planDays = 30, planDaily = true, calYm = today().slice(0, 7), calDay = '';
@@ -151,7 +151,7 @@ function buildIcs(opt) {
   });
   accs.filter(a => isCard(a) && a.payDay).forEach(a => {
     const d = nextDayAfter(+a.payDay, addDays(td, -1)); if (!d) return;
-    add('tarjeta-' + a.id, d, 'FREQ=MONTHLY;' + byMonthDay(a.payDay), `Pagar tarjeta ${a.name}`, `Fecha límite de pago${a.cutDay ? ' (corte el día ' + a.cutDay + ')' : ''}. En la app, Cuentas → ${a.name} → Pagar te dice cuánto.`);
+    add('tarjeta-' + a.id, d, 'FREQ=MONTHLY;' + byMonthDay(a.payDay), `Pagar ${cardWord(a)} ${a.name}`, `Fecha límite de pago${a.cutDay ? ' (corte el día ' + a.cutDay + ')' : ''}. En la app, Cuentas → ${a.name} → Pagar te dice cuánto.`);
   });
   accs.filter(a => isLoan(a) && a.payDay >= 1 && loanOwed(a) > 0.004).forEach(a => {
     const d = nextDayAfter(+a.payDay, addDays(td, -1)); if (!d) return;

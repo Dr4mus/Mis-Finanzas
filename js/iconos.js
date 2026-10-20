@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['iconos.js'] = '10.2.0';
+(window.__V = window.__V || {})['iconos.js'] = '10.3.0';
 /* Mis finanzas — Temas de íconos. Cada tema tiene un equivalente para TODOS los íconos de la app
    (lo revisa herramientas/temas_iconos.py). Lineal viene dentro de css/app.css; los demás se cargan
    solo si los eliges (css/iconos-<tema>.css). Todo se guarda solo en este teléfono, como la paleta. */

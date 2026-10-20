@@ -1,7 +1,7 @@
 'use strict';
-(window.__V = window.__V || {})['sync-ui.js'] = '10.2.0';
+(window.__V = window.__V || {})['sync-ui.js'] = '10.3.0';
 /* Mis finanzas — interfaz de la nube, aplicación de cambios remotos y arranque. */
-const APP_VERSION = '10.2.0';
+const APP_VERSION = '10.3.0';
 const KIND_KEY = { tx: 'txs', acc: 'accs', adj: 'adjs', rec: 'recs', goal: 'goals', debt: 'debts', asset: 'assets' };
 const strip = o => JSON.parse(JSON.stringify(o)); // Firestore no acepta "undefined"
 

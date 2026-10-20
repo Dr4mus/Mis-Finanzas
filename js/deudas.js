@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['deudas.js'] = '10.2.0';
+(window.__V = window.__V || {})['deudas.js'] = '10.3.0';
 /* Mis finanzas — Deudas y bienes: préstamos con tabla de pagos, deudas con personas (yo debo / me deben),
    bienes (casa, vehículo…), plan para salir de deudas y calculadora de préstamos. */
 let debtTab = 'loans', planExtra = '', planStrat = 'avalanche';

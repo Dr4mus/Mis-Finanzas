@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['herramientas.js'] = '10.2.0';
+(window.__V = window.__V || {})['herramientas.js'] = '10.3.0';
 /* Mis finanzas — Herramientas: suscripciones detectadas, presupuesto sugerido, simulador de metas,
    lo mío / lo tuyo / lo nuestro, pegar alerta del banco, importar estado de cuenta, reglas de categoría,
    etiquetas y eventos, y cierre de mes. */

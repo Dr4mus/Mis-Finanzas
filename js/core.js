@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['core.js'] = '10.2.0';
+(window.__V = window.__V || {})['core.js'] = '10.3.0';
 /* Mis finanzas — núcleo: utilidades, estado, almacenamiento y cálculos.
    Los demás scripts (views.js, sync-ui.js) comparten estas variables globales. */
 
@@ -55,7 +55,7 @@ const monthEnd = ym => new Date(Date.UTC(+ym.slice(0, 4), +ym.slice(5, 7), 0)).t
 
 // ============ íconos y colores ============
 const ICONS = ['home', 'utensils-crossed', 'car', 'heart-pulse', 'graduation-cap', 'plug-zap', 'clapperboard', 'shirt', 'credit-card', 'piggy-bank', 'briefcase', 'trending-up', 'gift', 'shopping-cart', 'dumbbell', 'plane', 'dog', 'baby', 'wrench', 'phone', 'wifi', 'book-open', 'coffee', 'beer', 'music', 'film', 'gamepad-2', 'scissors', 'stethoscope', 'pill', 'fuel', 'bus', 'train', 'bike', 'sofa', 'lightbulb', 'droplet', 'shield', 'landmark', 'wallet', 'banknote', 'receipt', 'tag'];
-const acctIcon = type => ({ 'Efectivo': 'wallet', 'Cuenta de ahorro': 'piggy-bank', 'Cuenta corriente': 'landmark', 'Tarjeta de crédito': 'credit-card', 'Préstamo': 'hand-coins' }[type] || 'wallet');
+const acctIcon = type => ({ 'Efectivo': 'wallet', 'Cuenta de ahorro': 'piggy-bank', 'Cuenta corriente': 'landmark', 'Tarjeta de crédito': 'credit-card', 'Línea de crédito': 'banknote', 'Préstamo': 'hand-coins' }[type] || 'wallet');
 const ACCENTS = ['blue', 'pink', 'yellow', 'purple'];
 function accentFor(name) { let h = 0; for (const c of String(name || '')) h = (h * 31 + c.charCodeAt(0)) >>> 0; return ACCENTS[h % 4]; }
 // Círculo de ícono con fondo tenue (antes usaba "var(--x)22", que es CSS inválido)
@@ -73,7 +73,7 @@ const DEF = {
   ],
   subs: { 'Entretenimiento': ['Netflix', 'Spotify', 'Cine', 'Salidas'] },
   people: ['Persona 1', 'Persona 2'], cur: ['USD', 'EUR'],
-  accTypes: ['Efectivo', 'Cuenta de ahorro', 'Cuenta corriente', 'Tarjeta de crédito', 'Préstamo'],
+  accTypes: ['Efectivo', 'Cuenta de ahorro', 'Cuenta corriente', 'Tarjeta de crédito', 'Línea de crédito', 'Préstamo'],
   budgetTotal: 0, budgetCats: {}, budgetOverrides: {}
 };
 const DEF0 = JSON.stringify(DEF), fresh = () => JSON.parse(DEF0);
@@ -124,7 +124,7 @@ function cleanState(o) {
     cfg: c, cfgT: num(o.cfgT),
     txs: arr(o.txs, cleanTx),
     trash: arr(o.trash, x => { const y = cleanTx(x); return y ? { ...y, del: num(x.del) } : null; }),
-    accs: arr(o.accs, x => (okId(x) ? { ...x, currency: CUR_RE.test(x.currency) ? x.currency : 'DOP', openBalance: num(x.openBalance), openDate: okDate(x.openDate) ? x.openDate : '2000-01-01' } : null)),
+    accs: arr(o.accs, x => (okId(x) ? { ...x, currency: CUR_RE.test(x.currency) ? x.currency : 'DOP', openBalance: num(x.openBalance), openDate: okDate(x.openDate) ? x.openDate : '2000-01-01', ...(x.limit != null ? { limit: num(x.limit) > 0 ? num(x.limit) : null } : {}), ...(x.over != null ? { over: num(x.over) > 0 ? num(x.over) : null, overPct: !!x.overPct } : {}) } : null)),
     adjs: arr(o.adjs, x => (okId(x) && okDate(x.date) && ID_RE.test(String(x.accId)) ? { ...x, balance: num(x.balance), u: num(x.u || x.createdAt), createdAt: num(x.createdAt || x.u) } : null)),
     recs: arr(o.recs, x => (okId(x) && ID_RE.test(String(x.accId || 'x')) ? { ...x, amount: num(x.amount), currency: CUR_RE.test(x.currency) ? x.currency : 'DOP', done: Array.isArray(x.done) ? x.done.filter(okDate) : [], lastConfirmed: okDate(x.lastConfirmed) ? x.lastConfirmed : undefined, startDate: okDate(x.startDate) ? x.startDate : today() } : null)),
     goals: arr(o.goals, x => (okId(x) ? { ...x, target: num(x.target) } : null)),
@@ -173,11 +173,25 @@ function rateOf(cu, d) {
 const refRate = cu => +((cfg.rates || {})[cu]) || 0;
 
 // ============ saldos ============
-const isCard = a => a && a.type == 'Tarjeta de crédito';
+// Tarjetas y líneas de crédito funcionan igual: lo que debes va en negativo, tienen corte y pago (opcionales), límite y sobregiro
+const CREDIT_TYPES = ['Tarjeta de crédito', 'Línea de crédito'];
+const isCard = a => !!a && CREDIT_TYPES.includes(a.type);
+const isLine = a => !!a && a.type == 'Línea de crédito';
+const cardWord = a => (isLine(a) ? 'línea de crédito' : 'tarjeta');
 const isLoan = a => a && a.type == 'Préstamo';
 // Cuentas que representan una deuda (tarjetas y préstamos): su saldo negativo es lo que debes
 const isDebtAcc = a => isCard(a) || isLoan(a);
 const goalHome = x => { const g = goals.find(q => q.id == x.goalId); return g ? (g.accId || null) : (x.home || null); };
+// Límite de crédito y sobregiro (tarjetas y líneas de crédito). a.limit = límite; a.over = sobregiro permitido:
+// un monto, o un % del límite si a.overPct. Devuelve null si la cuenta no tiene límite.
+function creditInfo(a, asOf) {
+  if (!isCard(a) || !(+a.limit > 0)) return null;
+  const limit = round2(+a.limit), over = +a.over > 0 ? round2(a.overPct ? limit * +a.over / 100 : +a.over) : 0;
+  const bal = acctBalance(a, asOf), debt = round2(Math.max(0, -bal)), max = round2(limit + over);
+  const avail = round2(limit + bal), room = round2(max + bal), overUsed = round2(Math.max(0, debt - limit)), pct = Math.round(debt / limit * 100);
+  const level = debt > max + 0.004 ? 'beyond' : debt > limit + 0.004 ? 'over' : pct >= 90 ? 'high' : 'ok';
+  return { limit, over, max, debt, avail, room, overUsed, pct, level };
+}
 
 // Monto de un ingreso/egreso expresado en la moneda de la cuenta.
 // Corrección: antes, un gasto en DOP desde una cuenta en USD restaba el número en pesos como si fueran dólares.

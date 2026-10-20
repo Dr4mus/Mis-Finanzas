@@ -1,5 +1,5 @@
 'use strict';
-(window.__V = window.__V || {})['screens.js'] = '10.2.0';
+(window.__V = window.__V || {})['screens.js'] = '10.3.0';
 /* Mis finanzas — pantallas. */
 let repYm = today().slice(0, 7);
 const bar = (pct, col) => `<div class="bar"><div style="width:${Math.max(0, Math.min(100, pct))}%;background:${col}"></div></div>`;
@@ -70,8 +70,16 @@ function homeAlerts() {
   });
   accs.forEach(a => {
     const cy = cardCycle(a); if (!cy || cy.left <= 0 || cy.days > 10) return; const dl = dueLabel(cy.pay);
-    out.push(AL(`card:${a.id}:${cy.cut}`, 'card:' + a.id, `Pago de la tarjeta ${a.name}`, 'Pagar ' + a.name, 'credit-card', 'Vuelve a salir con el próximo corte.',
+    out.push(AL(`card:${a.id}:${cy.cut}`, 'card:' + a.id, `Pago de la ${cardWord(a)} ${a.name}`, 'Pagar ' + a.name, 'credit-card', 'Vuelve a salir con el próximo corte.',
       alRow(`${circ(a.name, 'credit-card')}<div><b>Pagar ${esc(a.name)}</b><small>${money(cy.left, a.currency)} del corte del ${fdate(cy.cut)} · pago ${fdate(cy.pay)} ${pill(dl.t, dl.k || '')}</small></div><button onclick="openTransferForm(null,'${a.id}',${cy.left})">Pagar</button>`)));
+  });
+  accs.forEach(a => {
+    const ci = creditInfo(a); if (!ci || ci.level == 'ok') return; const cu = a.currency, ym0 = td.slice(0, 7), w = cardWord(a);
+    const [k, t, sm, ig] = ci.level == 'beyond' ? [`lim:${a.id}:beyond:${Math.round(ci.debt)}`, `${a.name} pasó el sobregiro permitido`, `Debes ${money(ci.debt, cu)}; el máximo es ${money(ci.max, cu)}.`, 'Vuelve a salir si la deuda sigue subiendo.']
+      : ci.level == 'over' ? [`lim:${a.id}:over:${ym0}`, `${a.name} está en sobregiro`, `Pasaste el límite por ${money(ci.overUsed, cu)}; te quedan ${money(ci.room, cu)} de sobregiro.`, 'Vuelve a salir si pasas el sobregiro permitido o el mes que viene.']
+      : [`lim:${a.id}:high:${ym0}`, `${a.name}: usaste ${ci.pct}% del límite`, `Te quedan ${money(ci.avail, cu)} de ${money(ci.limit, cu)}${ci.over > 0 ? ' (más ' + money(ci.over, cu) + ' de sobregiro)' : ''}.`, 'Vuelve a salir si entras en sobregiro o el mes que viene.'];
+    out.push(AL(k, 'lim:' + a.id, `Límite de la ${w} ${a.name}`, t, 'gauge', ig,
+      alRow(`${circ(a.name, 'gauge')}<div><b>${esc(t)}</b><small>${sm}</small>${bar(Math.min(100, ci.pct), credCol(ci.level))}</div><button onclick="openAccSheet('${a.id}')">Ver</button>`)));
   });
   const soon = [];
   recs.filter(r => r.active !== false).forEach(r => nextDates(r, maxISO(addDay(td), recFrom(r)), addDays(td, 7)).filter(d => !(r.done || []).includes(d)).forEach(d => soon.push({ r, d })));
@@ -290,13 +298,13 @@ function renderAcc(app) {
   const asOf = F.accAsOf || undefined, tot = totalsByCurrency(asOf), td = today();
   const owners = cfg.people.length > 1 && accs.some(a => a.owner) ? ['', ...cfg.people.filter(p => accs.some(a => a.owner == p)), '~'] : null;
   const list = accs.filter(a => !accOwner || (accOwner == '~' ? !a.owner : a.owner == accOwner));
-  const groups = [['Efectivo y bancos', 'wallet', list.filter(a => !isDebtAcc(a))], ['Tarjetas de crédito', 'credit-card', list.filter(isCard)], ['Préstamos', 'hand-coins', list.filter(isLoan)]];
+  const groups = [['Efectivo y bancos', 'wallet', list.filter(a => !isDebtAcc(a))], [list.some(isLine) ? 'Tarjetas y líneas de crédito' : 'Tarjetas de crédito', 'credit-card', list.filter(isCard)], ['Préstamos', 'hand-coins', list.filter(isLoan)]];
   const dop = tot.DOP || { disp: 0, deuda: 0 }, others = Object.entries(tot).filter(([c]) => c != 'DOP');
   const gsum = l => { const c = {}; l.forEach(a => { const b = acctBalance(a, asOf); c[a.currency] = (c[a.currency] || 0) + (isDebtAcc(a) ? Math.max(0, -b) : b); }); return Object.entries(c).map(([k, v]) => money(v, k)).join(' · '); };
   app.innerHTML = `${head('Cuentas')}
 <div class="card sumc"><small>Disponible${asOf ? ' al ' + fdate(asOf) : ''}</small><b class="big">${money(dop.disp)}</b>
 <div class="sum3"><div><small>Deudas en cuentas</small><b class="out">${money(dop.deuda)}</b></div><div><small>Neto</small><b class="${dop.disp - dop.deuda < 0 ? 'out' : ''}">${money(round2(dop.disp - dop.deuda))}</b></div></div>
-${others.map(([c, t]) => `<small class="mini" style="display:block;margin-top:8px">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}</div>
+${others.map(([c, t]) => `<small class="mini" style="display:block;margin-top:8px">En ${c}: ${money(t.disp, c)} disponible${t.deuda ? ' · deuda ' + money(t.deuda, c) : ''}</small>`).join('')}${creditSummary(list, asOf)}</div>
 ${owners ? `<div class="chips tabs" style="margin-bottom:4px">${owners.map(o => `<button class="${accOwner == o ? 'on' : ''}" data-o="${esc(o)}" onclick="accOwner=this.dataset.o;render()">${o == '' ? 'Todas' : o == '~' ? 'Del hogar' : esc(o)}</button>`).join('')}</div>` : ''}
 ${accs.length ? groups.filter(g => g[2].length).map(([t, ic, l]) => `<div class="ghd"><span><i class="icon-${ic}"></i> ${t}</span><b class="mut">${gsum(l)}</b></div><div class="card agrp">${l.slice().sort((x, y) => x.name.localeCompare(y.name)).map(accRow).join('')}</div>`).join('') : '<div class="card"><p class="empty" style="margin:0">Aún no tienes cuentas. Agrega la primera: efectivo, banco o tarjeta.</p></div>'}
 <div class="seg" style="margin-top:4px"><button class="p" onclick="openAccForm()"><i class="icon-plus"></i> Nueva cuenta</button>${accs.length >= 2 ? `<button onclick="openTransferForm()"><i class="icon-arrow-left-right"></i> Transferir</button>` : ''}</div>
@@ -305,6 +313,26 @@ ${accs.length ? groups.filter(g => g[2].length).map(([t, ic, l]) => `<div class=
 // Transferir desde una cuenta
 function trFrom(id) { openTransferForm(null, null, ''); trform.from = id; if (trform.to == id) trform.to = (accs.find(x => x.id != id) || {}).id; trform.note = ''; drawTransferForm(); }
 // Estado corto de una cuenta (para la fila y la hoja)
+// ---- límite de crédito y sobregiro ----
+const credCol = lv => (lv == 'beyond' ? 'var(--out)' : lv == 'over' ? 'var(--warn)' : lv == 'high' ? 'var(--yellow)' : 'var(--in)');
+function creditPill(a, asOf) {
+  const ci = creditInfo(a, asOf); if (!ci) return '';
+  return ci.level == 'beyond' ? pill('Pasó el sobregiro', 'out') : ci.level == 'over' ? pill('Sobregiro ' + money(ci.overUsed, a.currency), 'warn') : pill('Disponible ' + money(ci.avail, a.currency), ci.level == 'high' ? 'warn' : '');
+}
+function creditBox(a) {
+  const ci = creditInfo(a); if (!ci) return '';
+  const cu = a.currency, msg = ci.level == 'beyond' ? `<small class="warnline" style="margin:0">Pasaste el sobregiro permitido por ${money(round2(ci.debt - ci.max), cu)}. El banco podría rechazar compras o cobrarte cargos.</small>`
+    : ci.level == 'over' ? `<small class="warnline" style="margin:0">Estás en sobregiro: pasaste el límite por ${money(ci.overUsed, cu)}. Te quedan ${money(ci.room, cu)} de sobregiro.</small>` : '';
+  return `<div class="credsum"><div class="crrow"><span class="mut">Usado</span><b>${money(ci.debt, cu)} de ${money(ci.limit, cu)} · ${ci.pct}%</b></div>${bar(ci.pct, credCol(ci.level))}
+<div class="crrow"><span class="mut">Disponible</span><b class="${ci.avail < 0 ? 'out' : 'in'}">${money(Math.max(0, ci.avail), cu)}</b></div>
+${ci.over > 0 ? `<div class="crrow"><span class="mut">Sobregiro permitido${a.overPct ? ` (${a.over}%)` : ''}</span><b>${money(ci.over, cu)} · hasta ${money(ci.max, cu)}</b></div>` : ''}${msg}</div>`;
+}
+// Cuentas: cuánto crédito te queda en tarjetas y líneas con límite (por moneda)
+function creditSummary(list, asOf) {
+  const by = {}; list.forEach(a => { const ci = creditInfo(a, asOf); if (!ci) return; const t = by[a.currency] = by[a.currency] || { av: 0, lim: 0 }; t.av += Math.max(0, ci.avail); t.lim += ci.limit; });
+  const e = Object.entries(by); if (!e.length) return '';
+  return `<small class="mini" style="display:block;margin-top:8px"><i class="icon-credit-card"></i> Crédito disponible: ${e.map(([c, t]) => `${money(round2(t.av), c)} de ${money(round2(t.lim), c)}`).join(' · ')}</small>`;
+}
 function accStatus(a, short) {
   const asOf = F.accAsOf || undefined, cy = asOf ? null : cardCycle(a), ly = asOf ? null : loanCycle(a), out = [];
   if (cy) { const dl = dueLabel(cy.pay); out.push(cy.debtAtCut <= 0 ? pill('Sin saldo al corte', 'in') : cy.left <= 0 ? pill('Corte pagado ✓', 'in') : pill(short ? `Pagar ${dl.t.toLowerCase()}` : `Pagar ${money(cy.left, a.currency)} · ${dl.t.toLowerCase()}`, dl.k || 'warn')); }
@@ -312,7 +340,8 @@ function accStatus(a, short) {
   return { cy, ly, pills: out };
 }
 function accRow(a) {
-  const asOf = F.accAsOf || undefined, bal = acctBalance(a, asOf), loan = isLoan(a), debtA = isDebtAcc(a), st = accStatus(a, true), e = earm(a);
+  const asOf = F.accAsOf || undefined, bal = acctBalance(a, asOf), loan = isLoan(a), debtA = isDebtAcc(a), st = accStatus(a, true), e = earm(a), cp = creditPill(a, asOf);
+  if (cp) st.pills.push(cp);
   const sub = loan ? esc(a.lender || a.loanKind || 'Préstamo') : esc(a.type) + (a.currency != 'DOP' ? ' · ' + a.currency : '') + (a.owner ? ' · ' + esc(a.owner) : '');
   return `<div class="arow" role="button" onclick="openAccSheet('${a.id}')">${circ(a.name, loan ? loanIcon(a.loanKind) : acctIcon(a.type))}
 <div><b>${esc(a.name)}</b><small>${st.pills.length ? st.pills.join(' ') : sub}${e > 0 ? ' · ' + pill('Metas ' + money(e)) : ''}</small></div>
@@ -335,6 +364,7 @@ function openAccSheet(id) {
   dlg.innerHTML = `<div class="sheethd">${circ(a.name, loan ? loanIcon(a.loanKind) : acctIcon(a.type))}<div><b>${esc(a.name)}</b><small>${loan ? esc(a.lender || a.loanKind || 'Préstamo') : esc(a.type)} · ${a.currency}${a.owner ? ' · de ' + esc(a.owner) : ''}</small></div><button class="iconbtn" aria-label="Cerrar" onclick="dlg.close()"><i class="icon-x"></i></button></div>
 <div style="margin:14px 0 8px"><small class="mut">${debtA ? (bal < 0 ? 'Debes' : 'Saldo') : 'Disponible'}</small><div class="bigbal ${bal < 0 ? 'out' : ''}">${money(debtA ? Math.abs(bal) : bal, a.currency)}</div></div>
 ${meta.length ? `<div class="meta" style="margin-bottom:12px">${meta.join('')}</div>` : ''}
+${creditBox(a)}
 ${early ? `<small class="warnline" style="margin-bottom:10px">⚠ ${early} movimiento${early > 1 ? 's' : ''} con fecha anterior a la apertura (${fdate(a.openDate, 1)}) no cuenta${early > 1 ? 'n' : ''} en el saldo.</small>` : ''}
 <div class="actgrid">${acts.join('')}</div>
 ${last.length ? `<h3 class="grph" style="margin-top:18px">Últimos movimientos</h3>${last.map(x => histRow(x)).join('')}` : ''}`;

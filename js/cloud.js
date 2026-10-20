@@ -1,4 +1,4 @@
-(window.__V = window.__V || {})['cloud.js'] = '10.2.0';
+(window.__V = window.__V || {})['cloud.js'] = '10.3.0';
 /* Mis finanzas — sincronización con Firebase (Auth + Firestore).
    Solo se activa si js/config.js tiene la configuración de tu proyecto. */
 // Acepta window.FIREBASE_CONFIG = {...} o el bloque tal cual lo da Firebase: const firebaseConfig = {...};
@@ -20,7 +20,7 @@ const msg = e => ERR[e && e.code] || (e && e.message) || String(e);
 if (C.enabled) start().catch(e => { C.ready = true; C.error = 'No se pudo iniciar la nube: ' + msg(e); notify('state'); });
 
 async function start() {
-  const fb = await import('../vendor/firebase.js?v=10.2.0');
+  const fb = await import('../vendor/firebase.js?v=10.3.0');
   const app = fb.initializeApp(conf);
   let auth; try { auth = fb.initializeAuth(app, { persistence: [fb.indexedDBLocalPersistence, fb.browserLocalPersistence] }); } catch (e) { auth = fb.getAuth(app); }
   let db; try { db = fb.initializeFirestore(app, { localCache: fb.persistentLocalCache({ tabManager: fb.persistentMultipleTabManager() }) }); } catch (e) { db = fb.initializeFirestore(app, {}); }
